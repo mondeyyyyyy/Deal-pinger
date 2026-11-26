@@ -103,6 +103,12 @@ async function loadDeals(manual) {
   if (manual) toast('Up to date');
 }
 
+function soldUrl(hit) {
+  const s = searches.find((x) => x.id === hit.searchId);
+  const q = (s?.keywords || hit.listing.title).split('|')[0].trim();
+  return `https://www.ebay.co.uk/sch/i.html?_nkw=${encodeURIComponent(q)}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1`;
+}
+
 function messageFor(hit) {
   const s = searches.find((x) => x.id === hit.searchId);
   // Only mentions collecting on Facebook/Gumtree, or when the listing itself mentions collection.
@@ -147,6 +153,7 @@ function renderDeals() {
           <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${scam || hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}${cexChip}</div>
           <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}</div>
           ${valueLine ? `<div class="meta">${esc(valueLine)}</div>` : ''}
+          <div class="meta"><a class="linkish" data-act="sold" href="${esc(soldUrl(h))}" target="_blank" rel="noopener">Check eBay sold prices ↗</a></div>
           ${scam ? `<div class="warn">${esc(l.scam.reasons.join(' · '))}</div>` : ''}
         </div>
       </a>
@@ -170,7 +177,7 @@ $('#deals').addEventListener('click', async (e) => {
   if (!act) return;
   const card = e.target.closest('article');
   const hit = hits.find((h) => h.id === Number(card.dataset.id));
-  if (act === 'buy') return; // the link opens checkout
+  if (act === 'buy' || act === 'sold') return; // these links open in the browser
   if (act === 'unflag') {
     e.preventDefault();
     await api(`/api/hits/${hit.id}`, { method: 'PUT', body: { status: 'new' } });
@@ -223,6 +230,7 @@ function renderSearches() {
       <div class="grow" data-act="edit" style="cursor:pointer">
         <div class="sname">${esc(s.name)}</div>
         <div class="sub">${esc(s.keywords)}${price} · every ${everyLabel(s.intervalSec)} · ${s.sources.map(srcLabel).map(esc).join(', ')}</div>
+        <div class="sub">${s.enabled ? '' : '<b>Paused</b> · '}${s.hitCount ? `${s.hitCount} deal${s.hitCount === 1 ? '' : 's'} · last ${esc(ago(s.lastHitAt))}` : 'No deals yet'}</div>
       </div>
       <label class="switch"><input type="checkbox" data-act="toggle" ${s.enabled ? 'checked' : ''}><span></span></label>
     </div>`;
@@ -240,7 +248,8 @@ $('#searches').addEventListener('change', async (e) => {
   if (e.target.dataset.act !== 'toggle') return;
   const id = Number(e.target.closest('.row').dataset.id);
   const updated = await api(`/api/searches/${id}`, { method: 'PUT', body: { enabled: e.target.checked } });
-  searches = searches.map((s) => (s.id === id ? updated : s));
+  searches = searches.map((s) => (s.id === id ? { ...s, ...updated } : s));
+  renderSearches();
   toast(updated.enabled ? 'Watching again' : 'Paused');
 });
 
@@ -250,6 +259,20 @@ function openSheet(html) {
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); }
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet' || e.target.closest('[data-close]')) closeSheet(); });
+
+// Popular UK flips to get started quickly. Max prices are sensible buy-under figures; adjust to taste.
+const ALL = ['ebay', 'facebook', 'vinted', 'gumtree', 'depop'];
+const SKIP = 'broken, faulty, spares, repair, parts, box only, read description, cracked, locked, icloud';
+const PRESETS = [
+  { name: 'PS5', keywords: 'ps5 | playstation 5', maxPrice: 300, sources: ALL, exclude: SKIP + ', controller only, game only' },
+  { name: 'Nintendo Switch', keywords: 'nintendo switch', maxPrice: 160, sources: ALL, exclude: SKIP + ', game only, case only, dock only' },
+  { name: 'iPhone', keywords: 'iphone 14 | iphone 15', maxPrice: 350, sources: ALL, exclude: SKIP + ', case, screen protector' },
+  { name: 'AirPods Pro', keywords: 'airpods pro', maxPrice: 90, sources: ALL, exclude: SKIP + ', case only, left only, right only, replica, fake' },
+  { name: 'Lego', keywords: 'lego', maxPrice: 60, sources: ['facebook', 'gumtree', 'vinted', 'ebay'], exclude: 'minifigure only, instructions only, duplo' },
+  { name: 'Nike trainers', keywords: 'nike air max | nike dunk | jordan 1', maxPrice: 50, sources: ['vinted', 'depop', 'ebay'], exclude: 'fake, replica, kids, toddler' },
+  { name: 'Dyson', keywords: 'dyson', maxPrice: 120, sources: ['facebook', 'gumtree', 'ebay'], exclude: SKIP + ', charger only, battery only' },
+  { name: 'Steam Deck', keywords: 'steam deck', maxPrice: 250, sources: ALL, exclude: SKIP },
+];
 
 const EVERY = [[15, '15 seconds'], [30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [900, '15 minutes']];
 function everyLabel(sec) {
@@ -267,7 +290,9 @@ function openSearchForm(existing = null, { copy = false } = {}) {
   openSheet(`
     <h2>${s ? 'Edit search' : copy ? 'Copy of search' : 'New search'} <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
     <form id="searchForm">
-      <label class="f"><span>What are you looking for?</span><input class="t" name="keywords" value="${v('keywords')}" placeholder="nintendo switch oled" required></label>
+      ${!src ? `<div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">Quick start</span><div class="chips" id="presets" style="flex-wrap:wrap">${PRESETS.map((p, i) => `<button type="button" class="chip" data-i="${i}">${esc(p.name)}</button>`).join('')}</div></div>` : ''}
+      <label class="f"><span>What are you looking for?</span><input class="t" name="keywords" value="${v('keywords')}" placeholder="nintendo switch oled" required>
+        <span class="hint">Use | for other names for the same thing, e.g. <b>ps5 | playstation 5</b></span></label>
       <label class="f"><span>Name (optional)</span><input class="t" name="name" value="${v('name')}" placeholder="Switch flips"></label>
       <div class="two">
         <label class="f"><span>Min price (£)</span><input class="t" name="minPrice" inputmode="decimal" value="${v('minPrice')}" placeholder="0"></label>
@@ -323,6 +348,13 @@ function openSearchForm(existing = null, { copy = false } = {}) {
     } catch (err) { $('#formErr').textContent = err.message; }
   });
   setupCexPicker();
+  $$('#presets .chip').forEach((c) => c.addEventListener('click', () => {
+    const p = PRESETS[Number(c.dataset.i)];
+    const f = $('#searchForm');
+    f.keywords.value = p.keywords; f.elements.namedItem('name').value = p.name; f.maxPrice.value = p.maxPrice; f.excludeWords.value = p.exclude;
+    $$('input[name=sources]', f).forEach((x) => { x.checked = p.sources.includes(x.value); });
+    toast(`Filled in for ${p.name}. Tweak the price, then Start watching.`);
+  }));
   if (!s) return;
   $('#dupSearch').addEventListener('click', () => openSearchForm(s, { copy: true }));
   $('#delSearch').addEventListener('click', async () => {
@@ -449,6 +481,26 @@ $('#feePct').addEventListener('change', async () => {
     toast('Selling fee saved');
   } catch (err) { toast(err.message); }
 });
+$('#tapOpens').addEventListener('change', async () => {
+  try { await api('/api/settings', { method: 'PUT', body: { tapOpens: $('#tapOpens').value } }); toast('Saved'); } catch (err) { toast(err.message); }
+});
+$('#restoreFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const backup = JSON.parse(await file.text());
+    if (!confirm(`Add ${backup.searches?.length ?? 0} searches and ${backup.flips?.length ?? 0} flips from this backup?`)) return;
+    const r = await api('/api/restore', { method: 'POST', body: backup });
+    toast(`Restored ${r.searches} searches and ${r.flips} flips`);
+    searches = await api('/api/searches');
+  } catch (err) { toast(err instanceof SyntaxError ? "That file isn't a backup" : err.message); }
+});
+$('#logoutAll').addEventListener('click', async () => {
+  if (!confirm('Log out every phone and browser, including this one?')) return;
+  await api('/api/logout-all', { method: 'POST' }).catch(() => {});
+  showLogin();
+});
 $('#scamFilter').addEventListener('change', async () => {
   try { await api('/api/settings', { method: 'PUT', body: { scamFilter: $('#scamFilter').value } }); toast('Scam filter saved'); } catch (err) { toast(err.message); }
 });
@@ -465,6 +517,7 @@ async function loadSettings() {
   $('#feePct').value = settings.feePct || '';
   renderChannels(settings);
   $('#scamFilter').value = settings.scamFilter || 'hide';
+  $('#tapOpens').value = settings.tapOpens || 'listing';
   const took = (ms) => (ms == null ? '' : ` · took ${ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's'}`);
   $('#status').innerHTML = status.sources.map((s) => {
     const cls = s.ok === true ? 'ok' : s.ok === false ? 'bad' : '';
@@ -681,6 +734,9 @@ async function start() {
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+function clearBadge() { try { navigator.clearAppBadge?.(); } catch {} }
+clearBadge();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) clearBadge(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && tab === 'deals' && !$('#app').classList.contains('hidden')) loadDeals().catch(() => {}); });
 setInterval(() => { if (!document.hidden && tab === 'deals' && !$('#app').classList.contains('hidden')) loadDeals().catch(() => {}); }, 30000);
 start();

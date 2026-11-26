@@ -1,4 +1,4 @@
-const SHELL = 'deal-pinger-shell-v4';
+const SHELL = 'deal-pinger-shell-v5';
 const ASSETS = ['/', '/index.html', '/app.js', '/messages.js', '/manifest.webmanifest', '/icon-192.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
@@ -24,13 +24,20 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch { data = { title: 'Deal Pinger', body: e.data?.text() }; }
-  e.waitUntil(self.registration.showNotification(data.title || 'New deal', {
-    body: data.body || '',
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    tag: data.tag,
-    data: { url: data.url || '/' },
-  }));
+  e.waitUntil((async () => {
+    await self.registration.showNotification(data.title || 'New deal', {
+      body: data.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: data.tag,
+      data: { url: data.url || '/' },
+    });
+    // Home Screen icon badge = alerts waiting in Notification Centre.
+    try {
+      const shown = await self.registration.getNotifications();
+      if (self.navigator.setAppBadge) await self.navigator.setAppBadge(shown.length);
+    } catch {}
+  })());
 });
 
 self.addEventListener('notificationclick', (e) => {

@@ -61,6 +61,7 @@ nav.tabs button.on { color: var(--accent); }
 .b-gumtree { background: #3d7a1f; } .b-depop { background: #e0201a; }
 .drop { font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 6px; color: #fff; background: var(--accent); }
 .hot { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, #ff7a00 18%, transparent); color: #e25a00; }
+a.btn { text-decoration: none; text-align: center; }
 a.btn:not(.primary) { color: var(--text); }
 .actions .btn { white-space: nowrap; padding-left: 8px; padding-right: 8px; min-width: 0; }
 .actions .btn.x { flex: 0 0 40px; padding-left: 0; padding-right: 0; }
@@ -211,8 +212,26 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
       </div>
       <div class="section-title">Marketplaces</div>
       <div class="card" id="status"></div>
+      <div class="section-title">Buying</div>
+      <div class="card" style="padding:14px">
+        <label class="f" style="margin:0"><span>Tapping an alert opens</span><select class="t" id="tapOpens">
+          <option value="listing">The listing</option>
+          <option value="buy">Checkout straight away (Vinted, eBay Buy It Now)</option>
+        </select></label>
+        <div class="sub" style="margin-top:8px;white-space:normal">Checkout is never used for listings the scam filter is unsure about.</div>
+      </div>
+      <div class="section-title">Backup</div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="sname">Download a backup</div><div class="sub" style="white-space:normal">Searches, settings and flips (no passwords or tokens)</div></div>
+          <a class="btn sm" href="/api/backup" download>Download</a></div>
+        <div class="row"><div class="grow"><div class="sname">Restore a backup</div><div class="sub" style="white-space:normal">Adds its searches and flips to what's here</div></div>
+          <label class="btn sm" style="cursor:pointer">Choose file<input type="file" id="restoreFile" accept="application/json,.json" hidden></label></div>
+      </div>
       <div class="section-title">Account</div>
-      <div class="card"><div class="row"><div class="grow sname">Log out</div><button class="btn sm danger" id="logout">Log out</button></div></div>
+      <div class="card">
+        <div class="row"><div class="grow sname">Log out</div><button class="btn sm danger" id="logout">Log out</button></div>
+        <div class="row"><div class="grow"><div class="sname">Log out all devices</div><div class="sub" style="white-space:normal">Use this if someone else may have your password</div></div><button class="btn sm danger" id="logoutAll">Log out all</button></div>
+      </div>
     </section>
   </main>
 
