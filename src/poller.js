@@ -44,21 +44,28 @@ export async function runSourceOnce(search, sourceId, deps) {
   try {
     // Each "a | b" variant is its own marketplace query; merge the results.
     const variants = keywordVariants(search.keywords);
-    let cancelled = false; // set on timeout so we stop opening pages after the lane slot is released
+    let cancelled = false;
+    let lastNote = null; // set on timeout so we stop opening pages after the lane slot is released
     const fetchAll = async () => {
       if (variants.length <= 1) return src.search(search, ctx);
       const seenIds = new Set();
       const merged = [];
       for (const v of variants) {
         if (cancelled) break;
-        for (const l of await src.search({ ...search, keywords: v }, ctx)) {
+        const got = await src.search({ ...search, keywords: v }, ctx);
+        if (got.note) lastNote = got.note;
+        for (const l of got) {
           if (!seenIds.has(String(l.id))) { seenIds.add(String(l.id)); merged.push(l); }
         }
       }
+      if (!merged.length && lastNote) merged.note = lastNote;
       return merged;
     };
     listings = await withTimeout(fetchAll(), SOURCE_TIMEOUT_MS, sourceId).catch((e) => { cancelled = true; throw e; });
-    health?.record(sourceId, { ok: true, count: listings.length, error: null, ms: Date.now() - started });
+    // Zero listings with a note means the page showed something else (login wall, cookie banner, …): a warning.
+    const warn = !listings.length && listings.note ? listings.note : null;
+    health?.record(sourceId, { ok: true, count: listings.length, error: null, warn, ms: Date.now() - started });
+    if (warn) (deps.log || console).warn?.(`[${search.name}] ${sourceId}: no listings; ${warn}`);
   } catch (e) {
     health?.record(sourceId, { ok: false, error: e.message, ms: Date.now() - started });
     return { newHits: [], error: { source: sourceId, message: e.message } };

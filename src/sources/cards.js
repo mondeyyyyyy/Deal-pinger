@@ -34,5 +34,6 @@ export function parseCards(cards, { source, idPattern, urlFor, locationLine = tr
       postedAt: null,
     });
   }
+  if (cards?.note) out.note = cards.note; // keep the "what the page showed" note for empty results
   return out;
 }

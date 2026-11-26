@@ -92,10 +92,10 @@ export async function withPage(config, fn, { key } = {}) {
  * Load url and collect listing cards: every <a> matching hrefSelector.
  * Returns raw {href, text, img, alt} objects for a source's pure parse().
  */
-export async function scrapeCards(config, url, hrefSelector, { key } = {}) {
+export async function scrapeCards(config, url, hrefSelector, { key, waitMs = 15000 } = {}) {
   return withPage(config, async (page) => {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForSelector(hrefSelector, { timeout: 15000 }).catch(() => {});
+    await page.waitForSelector(hrefSelector, { timeout: waitMs }).catch(() => {});
     // No results after waiting: if the page is clearly a login wall or bot check, report it as blocked
     // (instead of "0 listings"). Only strong signals count, so a real empty results page stays empty.
     const blocked = await page.evaluate((sel) => {
@@ -110,7 +110,7 @@ export async function scrapeCards(config, url, hrefSelector, { key } = {}) {
     if (blocked) throw new Error(`Blocked: the site showed ${blocked} instead of results`);
     await page.mouse.wheel(0, 2500).catch(() => {});
     await page.waitForTimeout(400);
-    return page.$$eval(hrefSelector, (as) => as.map((a) => {
+    const cards = await page.$$eval(hrefSelector, (as) => as.map((a) => {
       const img = a.querySelector('img');
       let src = '';
       if (img) {
@@ -127,6 +127,12 @@ export async function scrapeCards(config, url, hrefSelector, { key } = {}) {
         alt: (img && img.alt) || a.getAttribute('aria-label') || a.getAttribute('title') || '',
       };
     }));
+    // Nothing found: note what the page showed instead (title + opening text), so "0 listings" can be diagnosed.
+    if (!cards.length) {
+      const seen = await page.evaluate(() => ({ title: document.title, text: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 140) })).catch(() => null);
+      if (seen) cards.note = `page "${seen.title}" showed: "${seen.text}"`;
+    }
+    return cards;
   }, { key });
 }
 

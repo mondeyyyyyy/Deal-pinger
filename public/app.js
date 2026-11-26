@@ -688,8 +688,9 @@ async function loadSettings() {
   $('#digestTime').value = settings.digestTime || '';
   const took = (ms) => (ms == null ? '' : ` · took ${ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's'}`);
   $('#status').innerHTML = status.sources.map((s) => {
-    const cls = s.ok === true ? 'ok' : s.ok === false ? 'bad' : '';
+    const cls = s.ok === true ? (s.warn ? 'warnd' : 'ok') : s.ok === false ? 'bad' : '';
     const sub = s.ok === undefined ? 'Not checked yet'
+      : s.ok && s.warn ? `No listings found · ${ago(s.at)} · the ${s.warn}`
       : s.ok ? `Working · ${s.count} listings · checked ${ago(s.at)}${took(s.ms)}`
       : `Failing: ${s.error} · ${ago(s.at)}`;
     const extra = s.id === 'ebay' ? (status.ebayApi ? ' · official API' : ' · no API keys, reading the website') : '';

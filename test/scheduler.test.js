@@ -160,3 +160,14 @@ test('a marketplace failing for 30+ minutes sends one warning, and one when it r
   assert.match(raw[1].title, /working again/i);
   await p.stop();
 });
+
+test('zero listings with an explanation shows as a warning, not plain "working"', async () => {
+  const empty = Object.assign([], { note: 'page said: "Log in to continue"' });
+  const d = deps({ fb: { label: 'Facebook', search: async () => empty } });
+  const s = d.db.addSearch({ name: 's', keywords: 'a', sources: ['fb'] });
+  const { runSourceOnce } = await import('../src/poller.js');
+  await runSourceOnce(s, 'fb', d);
+  const h = d.health.get().fb;
+  assert.equal(h.ok, true);
+  assert.match(h.warn, /Log in to continue/);
+});
