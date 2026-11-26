@@ -1,0 +1,13 @@
+{
+  "facebook": [
+    {"href": "/marketplace/item/1122334455667788/?ref=search", "text": "$120\nNintendo Switch with dock\nDaly City, CA", "img": "https://scontent.fb/x.jpg", "alt": "Nintendo Switch with dock in Daly City, CA"},
+    {"href": "/marketplace/item/9988776655/", "text": "Free\nBroken switch joycons\nOakland, CA", "img": "", "alt": ""},
+    {"href": "/marketplace/category/electronics", "text": "Electronics", "img": "", "alt": ""}
+  ],
+  "offerup": [
+    {"href": "/item/detail/5f2b3c4d-1111-2222-3333-444455556666", "text": "Nintendo Switch OLED\n$180\nSan Jose, CA", "img": "https://images.offerup.com/a.jpg", "alt": "Nintendo Switch OLED"}
+  ],
+  "mercari": [
+    {"href": "/us/item/m81234567890/", "text": "Nintendo Switch Lite Coral\n$95\n$120", "img": "https://u-mercari-images.mercdn.net/photos/m81234567890_1.jpg", "alt": "Nintendo Switch Lite Coral"}
+  ]
+}

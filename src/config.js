@@ -14,6 +14,7 @@ export function loadConfig(env = process.env) {
     ebayAppId: env.EBAY_APP_ID || '',
     ebayCertId: env.EBAY_CERT_ID || '',
     craigslistSite: env.CRAIGSLIST_SITE || 'sfbay',
+    facebookLocation: env.FACEBOOK_LOCATION || 'sanfrancisco',
     proxyUrl: env.PROXY_URL || '',
     pollIntervalSec: Number(env.POLL_INTERVAL_SEC || 90),
     timezone: env.TZ || 'America/Los_Angeles',
