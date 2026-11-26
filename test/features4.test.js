@@ -106,3 +106,16 @@ test('estimate combines eBay resale and CeX cash, scoring on the better one', ()
   assert.equal(onlyCex.refValue, 330);
   assert.equal(buildEstimate({ shipEstimate: 4 }, L('facebook', 'ps5', 150), { prices: [], cex: null }), null);
 });
+
+test('high-value item at around £80 from a brand-new account with no history is a likely scam', () => {
+  const fresh = { ratings: 0 };
+  const r = assessScam(L('vinted', 'AirPods Max', 80, { seller: fresh }), { value: 150 });
+  assert.equal(r.risk, 'high');
+  assert.ok(r.reasons.some(x => /£80 for a £150 item/.test(x)), r.reasons.join('|'));
+  const joined = new Date(Date.now() - 3 * 86400000).toISOString();
+  assert.equal(assessScam(L('ebay', 'Switch OLED', 95, { seller: { ratings: 1, joinedAt: joined } }), { value: 220 }).risk, 'high');
+  // not when the seller has a track record, the item isn't high value, or the price is fair
+  assert.notEqual(assessScam(L('vinted', 'AirPods Max', 80, { seller: { ratings: 40 } }), { value: 150 }).risk, 'high');
+  assert.equal(assessScam(L('vinted', 'Jumper', 80, { seller: fresh }), { value: 100 }).risk, 'low');
+  assert.notEqual(assessScam(L('vinted', 'Coat', 120, { seller: fresh }), { value: 150 }).risk, 'high'); // 80% of value: fair
+});

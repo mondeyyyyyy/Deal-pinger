@@ -1,6 +1,6 @@
 import { matches, keywordVariants } from './match.js';
 import { buildEstimate } from './comps.js';
-import { assessScam } from './scam.js';
+import { assessScam, isBaitPrice } from './scam.js';
 
 const SOURCE_TIMEOUT_MS = 120000;
 const COMPS_WAIT_MS = 2500; // never hold an alert longer than this for sold-price / CeX lookups
@@ -112,7 +112,8 @@ export async function runSourceOnce(search, sourceId, deps) {
   // Only suspiciously cheap listings cost an extra request to look up the seller; all at once, cached per seller.
   await Promise.all(alerts.map(async (listing, i) => {
     const ref = ests[i]?.refValue;
-    if (!src.sellerInfo || listing.seller || !ref || listing.price == null || listing.price > ref * 0.6) return;
+    if (!src.sellerInfo || listing.seller || !ref || listing.price == null) return;
+    if (listing.price > ref * 0.6 && !isBaitPrice(listing.price, ref)) return;
     const key = `${sourceId}:${listing.sellerId ?? listing.id}`;
     const hit = sellerCache.get(key);
     if (hit && Date.now() - hit.at < SELLER_CACHE_MS) { listing.seller = hit.info; return; }

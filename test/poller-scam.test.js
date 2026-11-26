@@ -65,3 +65,17 @@ test('minProfit counts selling to CeX for cash', async () => {
   await runSourceOnce(s, 'v', t.deps);
   assert.equal(t.sent.length, 1);
 });
+
+test('sellers are looked up for high-value items priced around £80, not only very cheap ones', async () => {
+  const t = setup();
+  t.deps.getSoldPrices = async () => [150];
+  t.deps.getCex = async () => null;
+  const s = t.db.updateSearch(t.s.id, { keywords: 'airpods max' });
+  t.setFeed([L('seed', 140, 'airpods max')]);
+  await runSourceOnce(s, 'v', t.deps);
+  t.setFeed([L('seed', 140, 'airpods max'), L('bait', 80, 'airpods max')]);
+  await runSourceOnce(s, 'v', t.deps);
+  assert.equal(t.sellerCalls(), 1);
+  assert.equal(t.sent.length, 0); // hidden as a likely scam
+  assert.equal(t.db.recentHits(5, { status: 'flagged' })[0].listing.id, 'bait');
+});

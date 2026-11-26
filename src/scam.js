@@ -15,6 +15,14 @@ const RED_FLAGS = [
 const DAY = 86400000;
 
 /**
+ * The classic bait: something worth £150+ listed at around £80 (£50–£120, under 75% of its usual price).
+ * From a brand-new account with no history, treat it as a likely scam.
+ */
+export function isBaitPrice(price, value) {
+  return value != null && price != null && value >= 150 && price >= 50 && price <= 120 && price < value * 0.75;
+}
+
+/**
  * Assess a listing. value = typical resale value (eBay sold median, else CeX sell price) or null.
  * Returns { risk: 'high' | 'medium' | 'low', reasons: string[] }.
  */
@@ -43,8 +51,11 @@ export function assessScam(listing, { value = null } = {}) {
   }
 
   const red = flags.length > 0;
+  const bait = untrusted && isBaitPrice(price, value);
+  if (bait && !tooCheap) reasons.unshift(`£${Math.round(price)} for a £${Math.round(value)} item from a brand-new account`);
+  else if (bait) reasons.splice(1, 0, `£${Math.round(price)} for a £${Math.round(value)} item from a brand-new account`);
   let risk = 'low';
-  if ((tooCheap && (untrusted || red)) || wayTooCheap || (red && untrusted)) risk = 'high';
+  if ((tooCheap && (untrusted || red)) || wayTooCheap || (red && untrusted) || bait) risk = 'high';
   else if (tooCheap || red || (untrusted && value != null && value >= 150)) risk = 'medium';
   return { risk, reasons };
 }
