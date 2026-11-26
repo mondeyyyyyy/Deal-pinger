@@ -114,13 +114,16 @@ export async function runSourceOnce(search, sourceId, deps) {
   // Only suspiciously cheap listings cost an extra request to look up the seller; all at once, cached per seller.
   await Promise.all(alerts.map(async (listing, i) => {
     const ref = ests[i]?.refValue;
-    if (!src.sellerInfo || listing.seller || !ref || listing.price == null) return;
+    // Skip only if we already have the full seller check (incl. account age); listing details may
+    // have given ratings alone, and a 2-day-old account with 3 ratings is still a brand-new account.
+    if (!src.sellerInfo || listing.seller?.joinedAt !== undefined || !ref || listing.price == null) return;
     if (listing.price > ref * 0.6 && !isBaitPrice(listing.price, ref)) return;
     const key = `${sourceId}:${listing.sellerId ?? listing.id}`;
     const hit = sellerCache.get(key);
-    if (hit && Date.now() - hit.at < SELLER_CACHE_MS) { listing.seller = hit.info; return; }
+    if (hit && Date.now() - hit.at < SELLER_CACHE_MS) { listing.seller = { ...listing.seller, ...hit.info }; return; }
     try {
-      listing.seller = await withTimeout(src.sellerInfo(listing, ctx), SELLER_WAIT_MS, 'seller');
+      const info = await withTimeout(src.sellerInfo(listing, ctx), SELLER_WAIT_MS, 'seller');
+      listing.seller = { ...listing.seller, ...info, joinedAt: info?.joinedAt ?? null };
       if (sellerCache.size > 2000) sellerCache.clear();
       sellerCache.set(key, { at: Date.now(), info: listing.seller });
     } catch {
@@ -137,15 +140,18 @@ export async function runSourceOnce(search, sourceId, deps) {
     newHits.push(hit);
     // Unknown profit isn't "below the minimum": alert rather than lose the deal for good.
     // (An automatic CeX match alone isn't trusted for this: it can be the wrong model.)
-    const profitKnown = est && (prices !== null || search.resaleOverride != null || est.cex?.pinned);
+    // No sold prices at all (none matched, or the lookup failed) means unknown, not "zero profit".
+    const profitKnown = est && ((prices && prices.length > 0) || search.resaleOverride != null || est.cex?.pinned);
     let worthIt = search.minProfit == null || !profitKnown || est.bestProfit >= search.minProfit;
     // "Only ping fresh listings": where the real listing time is known (Vinted, eBay API), skip old ones.
-    if (worthIt && search.maxAgeMin && listing.postedAt && Date.now() - new Date(listing.postedAt).getTime() > search.maxAgeMin * 60000) worthIt = false;
+    // (Price drops always count: the drop itself is the news, however old the listing.)
+    if (worthIt && search.maxAgeMin && listing.previousPrice == null && listing.postedAt && Date.now() - new Date(listing.postedAt).getTime() > search.maxAgeMin * 60000) worthIt = false;
     // "Only ping if I'd profit selling it to CeX": cash or voucher, above an optional minimum.
     // If CeX's price isn't known, it still pings (never silently lost).
     if (worthIt && search.cexFilter && est?.cex) {
       const cexProfit = search.cexFilter === 'voucher' ? est.cex.voucherProfit : est.cex.cashProfit;
-      worthIt = cexProfit != null && (search.cexMinProfit != null ? cexProfit >= search.cexMinProfit : cexProfit > 0);
+      // A missing CeX price (e.g. no voucher figure) is unknown: still ping.
+      worthIt = cexProfit == null || (search.cexMinProfit != null ? cexProfit >= search.cexMinProfit : cexProfit > 0);
     }
     // Another of your searches already sent this exact listing: keep the card, skip the second ping.
     if (worthIt && !hidden && !db.alertedElsewhere(search.id, listing)) toAlert.push(hit);

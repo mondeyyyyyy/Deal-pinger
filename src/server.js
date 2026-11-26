@@ -191,7 +191,9 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
   app.post('/api/searches/pause-all', (_req, res) => {
     const running = db.listSearches().filter(s => s.enabled).map(s => s.id);
     for (const id of running) db.updateSearch(id, { enabled: false });
-    if (running.length) db.cacheSet('pausedAll', running);
+    // Add to (not replace) the list from an earlier "pause all", so nothing is forgotten.
+    const saved = db.cacheGet('pausedAll', Infinity) || [];
+    db.cacheSet('pausedAll', [...new Set([...saved, ...running])]);
     res.json({ paused: running.length });
   });
   app.post('/api/searches/resume-all', (_req, res) => {
@@ -205,6 +207,8 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
   app.put('/api/searches/:id', findSearch, (req, res) => {
     const [patch, error] = cleanSearch(req.body || {}, { partial: true });
     if (error) return res.status(400).json({ error });
+    // Turning CeX prices off also turns off the "only if CeX makes a profit" filter.
+    if (patch.cexMode === 'off') patch.cexFilter = null;
     res.json(publicSearch(db.updateSearch(req.search.id, patch)));
   });
 

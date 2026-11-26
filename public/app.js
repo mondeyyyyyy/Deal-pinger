@@ -141,11 +141,14 @@ async function openDealSheet(hit) {
   let breakdown = row('Asking price', money(l.price));
   if (l.extraCost) breakdown += row('Vinted buyer protection fee', '+' + money(l.extraCost));
   if (e?.value != null && e?.profit != null) {
-    const fee = Math.round(e.value * (st.feePct || 0)) / 100;
+    // Use the fee and postage this estimate was made with, so the lines add up to its profit.
+    const feePct = e.feePct ?? st.feePct ?? 0;
+    const ship = e.ship ?? s?.shipEstimate ?? 4;
+    const fee = Math.round(e.value * feePct) / 100;
     breakdown += `<div class="sname" style="margin-top:10px">Resell on eBay</div>`
       + row(`Usual sold price${e.comps ? ` (${e.comps} sales)` : s?.resaleOverride != null ? ' (your figure)' : ''}`, money(e.value))
-      + (fee ? row(`Selling fee (${st.feePct}%)`, '−' + money(fee)) : '')
-      + row('Postage', '−' + money(s?.shipEstimate ?? 4))
+      + (fee ? row(`Selling fee (${feePct}%)`, '−' + money(fee)) : '')
+      + row('Postage', '−' + money(ship))
       + row('Your cost', '−' + money(Math.round(cost * 100) / 100))
       + row('Profit', `${e.profit >= 0 ? '+' : '−'}${money(Math.abs(e.profit))}`, e.profit >= 0 ? 'up' : 'down');
   }
@@ -633,6 +636,7 @@ async function saveQuiet() {
 $('#feePct').addEventListener('change', async () => {
   try {
     await api('/api/settings', { method: 'PUT', body: { feePct: $('#feePct').value || 0 } });
+    settingsCache = null;
     toast('Selling fee saved');
   } catch (err) { toast(err.message); }
 });

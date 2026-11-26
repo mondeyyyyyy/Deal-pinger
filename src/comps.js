@@ -99,7 +99,8 @@ export function createCompsFetcher({ db, fetchFn = fetch }) {
     const res = await fetchFn(url, { headers: { 'user-agent': UA, 'accept-language': 'en-GB' } });
     if (!res.ok) throw new Error(`eBay sold comps HTTP ${res.status}`);
     const prices = cleanSoldPrices(parseSoldItems(await res.text()), keywords);
-    db.cacheSet(key, prices);
+    // Don't remember "no comparable sales" for long: it's often a temporary blip.
+    if (prices.length) db.cacheSet(key, prices);
     return prices;
   }
 }
@@ -125,6 +126,9 @@ export function buildEstimate(search, listing, { prices = null, cex = null, feeP
   const base = Math.max(price ?? 0, 1);
   return {
     value: e?.value ?? null,
+    // What this estimate assumed, so a breakdown shown later adds up even if settings change.
+    feePct,
+    ship: search.shipEstimate ?? 4,
     profit: e?.profit ?? null,
     comps: e?.comps ?? 0,
     cex: cexPart,

@@ -183,7 +183,7 @@ export function createNotifier({ db, config, webpush, now, sourceLabel = (s) => 
       // Photo first (faster to judge a deal); if Telegram can't fetch the image, fall back to text.
       jobs.push(photo
         ? post(`${api}/sendPhoto`, { chat_id: s.telegramChatId, photo, caption, parse_mode: textMsg.parse_mode, reply_markup: textMsg.reply_markup })
-          .then(r => (r.ok ? 1 : sendText()))
+          .then(r => (r.ok ? 1 : sendText()), () => sendText())
         : sendText());
     }
     const results = await Promise.allSettled(jobs);
