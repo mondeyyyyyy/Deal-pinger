@@ -5,8 +5,13 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 ## Features
 
 - **Instant push alerts** on your iPhone, even when the app is closed.
-- **Fast checking.** Each search can check every 30 seconds, 1, 2, 5 or 15 minutes. Every marketplace runs on its own timer, side by side: Vinted and eBay are quick API lookups that run in parallel, and the browser-based sites share a small pool of warm browsers. A slow site never holds up a fast one.
-- **Telegram and Discord alerts** (optional). These are often the quickest and most dependable way to get pinged.
+- **Fast checking.** Each search can check every 15 or 30 seconds, or every 1, 2, 5 or 15 minutes. Every marketplace runs on its own timer, side by side: Vinted and eBay are quick API lookups that run in parallel, and the browser-based sites share a small pool of warm browsers. A slow site never holds up a fast one.
+- **Telegram and Discord alerts** (optional). These are often the quickest and most dependable way to get pinged. Telegram alerts have **Buy now**, **Open listing** and **CeX** buttons, plus a ready-to-copy seller message.
+- **Discord pinger.** Rich Discord posts with the photo, price, eBay resale, CeX prices, seller ratings and scam check, plus Buy now / Open / CeX links. You can ping `@here`, `@everyone` or a role, and give any search its own channel.
+- **Scam filter.** Flags listings that look too good to be true: far below their usual price (eBay sold or CeX), especially from sellers with no ratings or brand-new accounts, or that ask for bank transfer, PayPal friends & family, WhatsApp, a deposit and so on. Likely scams are hidden and never ping you; check them under **⚠️ Flagged**, where you can tap **Not a scam**. You can switch it to flag-only or off in Settings.
+- **CeX prices.** Each deal shows what CeX sells it for and what it pays in cash and voucher, so you can see an instant flip to CeX at a glance. Profit filters and 🔥 use whichever is better: reselling on eBay or cash from CeX. CeX uses the item matching all your keywords, or you can pin the exact CeX item on a search.
+- **Buy now.** Vinted and eBay Buy It Now deals have a Buy now button that goes straight to checkout. eBay auctions are labelled, and likely scams never get a Buy now button.
+- **Real costs.** Vinted's buyer protection fee is counted in the profit.
 - **🔥 Hot deals** (profit at least half the asking price) are flagged in alerts and the feed.
 - **Bursts become one alert.** More than 3 new deals from one check arrive as a single summary, best profit first.
 - **Flips tracker.** Tap **Bought** on a deal, later tap **Sold**, and see profit this month, total profit, stock tied up and return on investment. You can export it all to a spreadsheet.
@@ -14,7 +19,7 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Profit estimates.** Resale value is the median of recent **eBay UK sold** prices, or your own figure ("I can resell these for £…"). From that, Deal Pinger subtracts your selling fee and postage, then the asking price. The fee defaults to 0%, because private sellers on eBay UK and Vinted pay no selling fees.
 - **Sort by best profit**, or filter to saved deals or price drops.
 - **Price history** per search: a chart of asking prices against the eBay sold median.
-- **One-tap seller message.** "Message" copies your saved message (e.g. "Hi! Is this still available? I can collect today for {offer}.") and opens the listing, so you just paste and send. `{offer}` is about 85% of the asking price.
+- **One-tap seller message.** "Message" copies a message for that listing and opens it, so you just paste and send. It only mentions collecting on Facebook Marketplace and Gumtree (where you collect), or when the listing itself mentions collection or pick-up. On Vinted, Depop and eBay it never does. The default is "Hi! Is this still available? {collect}Would you take {offer}?", where `{offer}` is about 85% of the asking price.
 - **Filters:** price range, postcode and radius, words to skip ("faulty, spares, box only"), and "only ping if profit is at least £X".
 - **Quiet hours** (UK time). Deals still collect in your feed.
 - **Marketplace status page**, so you can see when a site is working or blocked.
@@ -61,13 +66,21 @@ In the app: **Settings → Telegram → Set up**, then follow the four steps on 
 3. Send `/start` to your new bot.
 4. Tap **Link**. A test message arrives straight away.
 
-Discord works the same way with a channel webhook: **Settings → Discord → Set up**.
+## Discord pinger (optional, free)
+
+1. In your Discord server: **Channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL**.
+2. In the app: **Settings → Discord → Set up**, paste it, and choose who to ping with each alert (nobody, `@here`, `@everyone`, or a role).
+3. Tap **Save & test**. A test post appears in the channel.
+
+To send a particular search to its own channel (say, a #ps5 channel), edit that search and paste that channel's webhook under "Send this search to its own Discord channel".
 
 ## How fast is it?
 
-- **Vinted** can be checked every 20 seconds, and **eBay** every 45 seconds. With API keys, eBay automatically slows down when you have lots of eBay searches, to stay inside eBay's free limit of about 5,000 lookups a day: 10 eBay searches means a check about every 3 minutes each.
+- **Vinted** can be checked every 15 seconds, and **eBay** every 45 seconds. With API keys, eBay automatically slows down when you have lots of eBay searches, to stay inside eBay's free limit of about 5,000 lookups a day: 10 eBay searches means a check about every 3 minutes each.
 - **Facebook, Gumtree and Depop** load a real (headless) browser, so they're checked at most every 45 seconds, and each check takes a few seconds. Images, video and fonts are skipped, and each site keeps a warm browser session, so repeat checks are much quicker.
 - Alerts go out the moment a listing is found. Profit estimates never hold an alert up by more than 2.5 seconds.
+- eBay sold prices and CeX prices are **pre-loaded** for every search (and again whenever you edit one), so alerts never wait for them.
+- Up to 6 quick lookups (eBay, Vinted) run at the same time.
 - **Settings → Marketplaces** shows when each site was last checked and how long it took.
 
 ## Getting eBay API keys (optional, free)
