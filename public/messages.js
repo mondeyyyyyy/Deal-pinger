@@ -5,15 +5,24 @@ export const COLLECTION_SOURCES = ['facebook', 'gumtree'];
 
 export const DEFAULT_TEMPLATE = 'Hi! Is this still available? {collect}Would you take {offer}?';
 
+// Phrases that mean "you collect it from the seller" (not "a card collection").
+const PICKUP = /\b(collection only|collect(?:ion)? (?:from|in|at|only)|can collect|collect in person|local (?:collection|pick[\s-]?up)|pick[\s-]?up(?: only)?|pickup)\b/i;
+// Phrases that rule collecting out, even on Facebook or Gumtree.
+const NO_PICKUP = /\b(no collection|no pick[\s-]?ups?|postage only|post only|will post|posted only|delivery only|shipping only)\b/i;
+// Used to strip collecting sentences from the user's own template.
 const COLLECT_WORDS = /\b(collect(?:ion|ed|ing)?|pick[\s-]?up|pickup)\b/i;
 
-/** True when the listing itself talks about collection / pick-up. */
+const textOf = (l) => `${l.title || ''} ${l.description || ''}`;
+
+/** True when the listing itself says it's for collection / pick-up. */
 export function mentionsCollection(listing) {
-  return COLLECT_WORDS.test(`${listing.title || ''} ${listing.description || ''}`);
+  const t = textOf(listing);
+  return PICKUP.test(t) && !NO_PICKUP.test(t);
 }
 
 /** Should a message to this seller talk about collecting? */
 export function isCollection(listing) {
+  if (NO_PICKUP.test(textOf(listing))) return false;
   return COLLECTION_SOURCES.includes(listing.source) || mentionsCollection(listing);
 }
 

@@ -293,8 +293,8 @@ function openSearchForm(existing = null, { copy = false } = {}) {
       </div>
       <label class="f"><span>Seller message</span><textarea class="t" name="messageTemplate" rows="2">${v('messageTemplate', DEFAULT_TEMPLATE)}</textarea>
         <span class="hint">{offer} = about 85% of the price. {collect} becomes "I can collect today." only on Facebook/Gumtree or when the listing mentions collection; otherwise anything about collecting is left out.</span></label>
-      <label class="f"><span>Send this search to its own Discord channel (optional)</span><input class="t" name="discordWebhook" placeholder="${src?.hasDiscordWebhook ? 'Own channel set. Paste a new link to change it.' : 'https://discord.com/api/webhooks/…'}" autocomplete="off">
-        ${src?.hasDiscordWebhook && !copy ? '<label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:14px"><input type="checkbox" name="clearDiscord"> Stop using its own channel</label>' : ''}</label>
+      <label class="f"><span>Send this search to its own Discord channel (optional)</span><input class="t" name="discordWebhook" placeholder="${s?.hasDiscordWebhook ? 'Own channel set. Paste a new link to change it.' : 'https://discord.com/api/webhooks/…'}" autocomplete="off">
+        ${s?.hasDiscordWebhook ? '<label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:14px"><input type="checkbox" name="clearDiscord"> Stop using its own channel</label>' : ''}</label>
       <div class="err" id="formErr"></div>
       <button class="btn primary" style="width:100%">${s ? 'Save' : 'Start watching'}</button>
       ${s ? `<div style="display:flex;gap:8px;margin-top:10px">

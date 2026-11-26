@@ -4,13 +4,17 @@ import { withPage } from '../browser.js';
 export const id = 'vinted';
 export const label = 'Vinted';
 export const lane = 'fetch';
-export const minIntervalSec = 15;
+// Every 15s at most; with many Vinted searches, spread out to roughly 20 requests a minute in total.
+export function minIntervalSec({ searchCount = 1 } = {}) {
+  return Math.max(15, Math.ceil(searchCount * 3));
+}
 
 const BASE = 'https://www.vinted.co.uk';
 
 /** Parse a Vinted /api/v2/catalog/items response. */
 export function parse(json) {
-  return (json.items || []).map((it) => {
+  // Reserved or sold items can't be bought, so they're not deals.
+  return (json.items || []).filter((it) => !it.is_reserved && !it.is_closed && !it.is_sold).map((it) => {
     const raw = it.price && typeof it.price === 'object' ? it.price.amount : it.price;
     const url = String(it.url || `/items/${it.id}`);
     const price = parsePrice(raw);
@@ -62,6 +66,8 @@ export function buildApiUrl(s) {
   return `${BASE}/api/v2/catalog/items?${p}`;
 }
 
+const blocked = (msg) => Object.assign(new Error(msg), { blocked: true });
+
 // Vinted's API needs the session cookies the homepage hands out. Cache them and refresh on 401/403.
 let cookies = null;
 
@@ -69,7 +75,7 @@ async function getCookies(ctx) {
   const res = await ctx.fetch(BASE + '/', { redirect: 'follow' });
   const set = res.headers.getSetCookie?.() || [];
   cookies = set.map((c) => c.split(';')[0]).join('; ');
-  if (!cookies) throw new Error(`Vinted gave no session (HTTP ${res.status})`);
+  if (!cookies) throw blocked(`Vinted gave no session (HTTP ${res.status})`);
   return cookies;
 }
 
@@ -78,10 +84,11 @@ async function viaFetch(s, ctx) {
     const cookie = cookies || (await getCookies(ctx));
     const res = await ctx.fetch(buildApiUrl(s), { headers: { cookie, accept: 'application/json' } });
     if (res.status === 401 || res.status === 403) { cookies = null; continue; }
+    if (res.status === 429) throw blocked('Vinted is rate-limiting us (HTTP 429)');
     if (!res.ok) throw new Error(`Vinted HTTP ${res.status}`);
     return parse(await res.json());
   }
-  throw new Error('Vinted refused the session');
+  throw blocked('Vinted refused the session');
 }
 
 // When the plain API call is blocked, use the browser for a while instead of failing first every time.
@@ -127,6 +134,8 @@ export async function search(s, ctx) {
   try {
     return await viaFetch(s, ctx);
   } catch (e) {
+    // A blip (timeout, 5xx) just fails this check; only real blocking moves Vinted to the browser.
+    if (!e.blocked) throw e;
     fetchBlockedUntil = Date.now() + BLOCKED_FOR_MS;
     try {
       return await viaBrowser(s, ctx);

@@ -3,8 +3,10 @@ import { buildEstimate } from './comps.js';
 import { assessScam } from './scam.js';
 
 const SOURCE_TIMEOUT_MS = 120000;
-const COMPS_WAIT_MS = 2500;
-const SELLER_WAIT_MS = 3000; // seller-rating lookup for suspiciously cheap listings // never hold an alert longer than this for a sold-price lookup
+const COMPS_WAIT_MS = 2500; // never hold an alert longer than this for sold-price / CeX lookups
+const SELLER_WAIT_MS = 3000; // seller-rating lookups (only for suspiciously cheap listings)
+const SELLER_CACHE_MS = 3600 * 1000;
+const sellerCache = new Map(); // "source:sellerId" -> { at, info }
 const PRICE_DROP_FRACTION = 0.05; // alert again when a seen listing gets at least 5% cheaper
 const PRUNE_EVERY_MS = 3600 * 1000;
 const WARM_EVERY_MS = 6 * 3600 * 1000;
@@ -85,15 +87,28 @@ export async function runSourceOnce(search, sourceId, deps) {
   const { feePct, scamFilter } = db.getSettings();
   const newHits = [];
   const toAlert = [];
-  for (const listing of alerts) {
-    const est = buildEstimate(search, listing, { prices, cex, feePct });
-    // Only suspiciously cheap listings cost an extra request to look up the seller's ratings.
-    const ref = est?.refValue;
-    if (src.sellerInfo && !listing.seller && ref && listing.price != null && listing.price <= ref * 0.6) {
-      listing.seller = await withTimeout(src.sellerInfo(listing, ctx), SELLER_WAIT_MS, 'seller').catch(() => null);
+  const ests = alerts.map((listing) => buildEstimate(search, listing, { prices, cex, feePct }));
+  // Only suspiciously cheap listings cost an extra request to look up the seller; all at once, cached per seller.
+  await Promise.all(alerts.map(async (listing, i) => {
+    const ref = ests[i]?.refValue;
+    if (!src.sellerInfo || listing.seller || !ref || listing.price == null || listing.price > ref * 0.6) return;
+    const key = `${sourceId}:${listing.sellerId ?? listing.id}`;
+    const hit = sellerCache.get(key);
+    if (hit && Date.now() - hit.at < SELLER_CACHE_MS) { listing.seller = hit.info; return; }
+    try {
+      listing.seller = await withTimeout(src.sellerInfo(listing, ctx), SELLER_WAIT_MS, 'seller');
+      if (sellerCache.size > 2000) sellerCache.clear();
+      sellerCache.set(key, { at: Date.now(), info: listing.seller });
+    } catch {
+      listing.sellerCheckFailed = true;
     }
-    listing.scam = assessScam(listing, { value: ref ?? null });
-    const hidden = scamFilter !== 'off' && scamFilter !== 'flag' && listing.scam.risk === 'high';
+  }));
+  for (const [i, listing] of alerts.entries()) {
+    const est = ests[i];
+    listing.scam = assessScam(listing, { value: est?.refValue ?? null });
+    // A listing the user marked "Not a scam" stays trusted, even if its price drops later.
+    const trusted = db.cacheGet(`trust:${listing.source}:${listing.id}`, Infinity) !== undefined;
+    const hidden = !trusted && scamFilter !== 'off' && scamFilter !== 'flag' && listing.scam.risk === 'high';
     const hit = db.addHit(search.id, listing, est, hidden ? 'flagged' : 'new');
     newHits.push(hit);
     const worthIt = search.minProfit == null || (est && est.bestProfit >= search.minProfit);
@@ -211,13 +226,19 @@ export function startPoller(deps, {
       const active = new Set();
       // Pre-load sold prices and CeX prices so alerts have them instantly (caches last 12-24h).
       if (deps.warm) {
+        // At most a few per tick, so startup doesn't fire every lookup at once.
+        let budget = 3;
+        const current = new Set();
         for (const s of searches) {
           // Keyed on what the lookups depend on, so editing keywords or the CeX item warms straight away.
           const wkey = `${s.id}|${s.keywords}|${s.cexBoxId ?? ''}|${s.cexMode ?? ''}`;
-          if (now() - (lastWarm.get(wkey) ?? -Infinity) < WARM_EVERY_MS) continue;
+          current.add(wkey);
+          if (now() - (lastWarm.get(wkey) ?? -Infinity) < WARM_EVERY_MS || budget <= 0) continue;
+          budget--;
           lastWarm.set(wkey, now());
           Promise.resolve().then(() => deps.warm(s)).catch(() => {});
         }
+        for (const k of lastWarm.keys()) if (!current.has(k)) lastWarm.delete(k);
       }
       for (const s of searches) {
         for (const sourceId of s.sources) {

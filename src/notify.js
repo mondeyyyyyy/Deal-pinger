@@ -62,7 +62,7 @@ function discordDeal(search, hit, sourceLabel) {
   const l = hit.listing;
   const e = hit.estimate;
   const links = [];
-  if (l.buyUrl) links.push(`[Buy now](${l.buyUrl})`);
+  if (l.buyUrl && l.scam?.risk !== 'high') links.push(`[Buy now](${l.buyUrl})`);
   links.push(`[Open listing](${l.url})`);
   if (e?.cex?.url) links.push(`[CeX](${e.cex.url})`);
   const fields = [{ name: 'Price', value: l.price == null ? '?' : money(l.price), inline: true }];
@@ -100,7 +100,7 @@ function telegramDeal(search, hit, sourceLabel) {
   if (risky(l)) lines.push(html(`⚠️ Scam check: ${l.scam.reasons.join(', ')}`));
   lines.push('', 'Message to send:', `<code>${html(buildMessage(search.messageTemplate, l))}</code>`);
   const row1 = [];
-  if (l.buyUrl) row1.push({ text: '🛒 Buy now', url: l.buyUrl });
+  if (l.buyUrl && l.scam?.risk !== 'high') row1.push({ text: '🛒 Buy now', url: l.buyUrl });
   row1.push({ text: '🔗 Open listing', url: l.url });
   const keyboard = [row1];
   if (hit.estimate?.cex?.url) keyboard.push([{ text: '💷 CeX', url: hit.estimate.cex.url }]);

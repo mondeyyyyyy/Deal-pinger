@@ -24,7 +24,7 @@ export function parse(json) {
       source: id,
       id: String(legacy),
       // An auction's price is just the current bid, so say so.
-      title: auctionOnly ? `${it.title} (auction)` : it.title,
+      title: auctionOnly ? `${it.title} (auction)` : options.includes('AUCTION') ? `${it.title} (auction, or Buy It Now)` : it.title,
       price: it.price ? parsePrice(it.price.value) : (it.currentBidPrice ? parsePrice(it.currentBidPrice.value) : null),
       url: `https://www.ebay.co.uk/itm/${legacy}`,
       image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,

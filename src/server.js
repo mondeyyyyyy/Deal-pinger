@@ -168,7 +168,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
 
   app.post('/api/searches/:id/run', findSearch, async (req, res) => {
     const r = await runNow(req.search.id);
-    res.json({ newHits: r?.newHits?.length ?? 0, errors: r?.errors ?? [] });
+    res.json({ newHits: (r?.newHits ?? []).filter(h => h.status !== 'flagged').length, errors: r?.errors ?? [] });
   });
 
   app.get('/api/searches/:id/history', findSearch, (req, res) => {
@@ -188,7 +188,11 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
   app.put('/api/hits/:id', (req, res) => {
     const status = req.body?.status;
     if (!HIT_STATUSES.includes(status)) return res.status(400).json({ error: 'Bad status' });
-    db.setHitStatus(Number(req.params.id), status);
+    const id = Number(req.params.id);
+    const before = db.recentHits(1000, { includeDismissed: true }).find(h => h.id === id);
+    // "Not a scam": remember it so a later price drop doesn't hide it again.
+    if (before?.status === 'flagged' && status !== 'flagged' && status !== 'dismissed') db.cacheSet(`trust:${before.listing.source}:${before.listing.id}`, 1);
+    db.setHitStatus(id, status);
     res.json({ ok: true });
   });
 

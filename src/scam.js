@@ -27,6 +27,7 @@ export function assessScam(listing, { value = null } = {}) {
   const seller = listing.seller || null;
   const noRatings = seller != null && seller.ratings === 0;
   const newAccount = seller?.joinedAt != null && Date.now() - new Date(seller.joinedAt).getTime() < 30 * DAY;
+  if (listing.sellerCheckFailed) reasons.push("couldn't check the seller");
   if (noRatings) reasons.push('seller has no ratings');
   else if (newAccount) reasons.push('seller account is under 30 days old');
   const untrusted = noRatings || newAccount;

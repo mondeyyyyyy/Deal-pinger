@@ -100,7 +100,7 @@ test('estimate combines eBay resale and CeX cash, scoring on the better one', ()
   assert.equal(e.cex.cashProfit, 55);
   assert.equal(e.cex.voucherProfit, 100);
   assert.equal(e.bestProfit, 106);
-  const onlyCex = buildEstimate({ shipEstimate: 4 }, L('facebook', 'ps5', 150), { prices: null, cex, feePct: 0 });
+  const onlyCex = buildEstimate({ shipEstimate: 4 }, L('facebook', 'ps5', 150), { prices: null, cex: { ...cex, pinned: true }, feePct: 0 });
   assert.equal(onlyCex.profit, null);
   assert.equal(onlyCex.bestProfit, 55);
   assert.equal(onlyCex.refValue, 330);

@@ -129,7 +129,7 @@ test('I5: Vinted browser fallback runs in the browser lane and remembers that th
   const lanes = [];
   const ctx = {
     config: {},
-    fetch: async () => { fetches++; throw new Error('blocked'); },
+    fetch: async () => { fetches++; return { ok: false, status: 403, headers: { getSetCookie: () => [] } }; },
     inLane: async (lane, fn) => { lanes.push(lane); return fn(); },
     withPage: async (_c, fn) => fn({ goto: async () => {}, evaluate: async () => ({ status: 200, body: { items: [{ id: 1, title: 't', price: '5', url: '/items/1' }] } }) }),
   };

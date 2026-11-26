@@ -122,7 +122,7 @@ test('each marketplace declares its lane and minimum interval', () => {
   assert.equal(SOURCES.ebay.lane, 'fetch');
   assert.equal(SOURCES.vinted.lane, 'fetch');
   for (const id of ['facebook', 'gumtree', 'depop']) assert.equal(SOURCES[id].lane, 'browser', id);
-  assert.equal(SOURCES.vinted.minIntervalSec, 15);
+  assert.equal(SOURCES.vinted.minIntervalSec({ searchCount: 1 }), 15);
   assert.equal(SOURCES.facebook.minIntervalSec, 45);
 });
 
@@ -143,7 +143,7 @@ test('vinted: buy-now link, seller id, 15s minimum', () => {
   assert.equal(l.buyUrl, 'https://www.vinted.co.uk/transaction/buy/new?source_screen=item&transaction%5Bitem_id%5D=42');
   assert.equal(l.sellerId, '7');
   assert.equal(l.sellerName, 'bob');
-  assert.equal(SOURCES.vinted.minIntervalSec, 15);
+  assert.equal(SOURCES.vinted.minIntervalSec({ searchCount: 1 }), 15);
 });
 
 test('vinted seller ratings from the user API', async () => {

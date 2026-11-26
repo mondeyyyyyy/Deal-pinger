@@ -44,7 +44,13 @@ export function parseSold(html) {
 const TWELVE_H = 12 * 3600 * 1000;
 
 export function createCompsFetcher({ db, fetchFn = fetch }) {
-  return async function getSoldPrices(keywords) {
+  const inflight = new Map();
+  return function getSoldPrices(keywords) {
+    const k = mainKeywords(keywords).toLowerCase().trim();
+    if (!inflight.has(k)) inflight.set(k, lookup(keywords).finally(() => inflight.delete(k)));
+    return inflight.get(k);
+  };
+  async function lookup(keywords) {
     keywords = mainKeywords(keywords);
     const key = 'sold:' + keywords.toLowerCase().trim();
     const cached = db.cacheGet(key, TWELVE_H);
@@ -56,7 +62,7 @@ export function createCompsFetcher({ db, fetchFn = fetch }) {
     const prices = parseSold(await res.text());
     db.cacheSet(key, prices);
     return prices;
-  };
+  }
 }
 
 export const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
@@ -84,7 +90,9 @@ export function buildEstimate(search, listing, { prices = null, cex = null, feeP
     comps: e?.comps ?? 0,
     cex: cexPart,
     bestProfit,
-    refValue: e?.value ?? cex?.sell ?? null,
+    // An automatic CeX match can be the wrong model, so only a pinned CeX item may stand in for
+    // eBay prices as the "usual price" the scam check compares against.
+    refValue: e?.value ?? (cex?.pinned ? cex.sell : null) ?? null,
     score: Math.max(0, Math.min(100, Math.round((bestProfit / base) * 100))),
   };
 }
