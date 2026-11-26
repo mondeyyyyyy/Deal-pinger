@@ -139,6 +139,8 @@ export async function runSourceOnce(search, sourceId, deps) {
     // (An automatic CeX match alone isn't trusted for this: it can be the wrong model.)
     const profitKnown = est && (prices !== null || search.resaleOverride != null || est.cex?.pinned);
     let worthIt = search.minProfit == null || !profitKnown || est.bestProfit >= search.minProfit;
+    // "Only ping fresh listings": where the real listing time is known (Vinted, eBay API), skip old ones.
+    if (worthIt && search.maxAgeMin && listing.postedAt && Date.now() - new Date(listing.postedAt).getTime() > search.maxAgeMin * 60000) worthIt = false;
     // "Only ping if I'd profit selling it to CeX": cash or voucher, above an optional minimum.
     // If CeX's price isn't known, it still pings (never silently lost).
     if (worthIt && search.cexFilter && est?.cex) {

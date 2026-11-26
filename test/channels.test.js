@@ -43,9 +43,9 @@ test('sends to Discord and Telegram when configured', async () => {
   const discord = posts.find(p => p.url.startsWith('https://discord.com/'));
   assert.equal(discord.body.embeds[0].url, 'https://www.vinted.co.uk/items/9');
   assert.match(discord.body.embeds[0].title, /£40 · Switch Lite/);
-  const tg = posts.find(p => p.url === 'https://api.telegram.org/bot123:AB/sendMessage');
+  const tg = posts.find(p => p.url === 'https://api.telegram.org/bot123:AB/sendPhoto'); // the listing has a photo
   assert.equal(tg.body.chat_id, '42');
-  assert.match(tg.body.text, /Switch Lite/);
+  assert.match(tg.body.caption, /Switch Lite/);
   assert.equal(tg.body.reply_markup.inline_keyboard[0].at(-1).url, 'https://www.vinted.co.uk/items/9');
 });
 

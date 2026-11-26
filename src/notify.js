@@ -105,7 +105,16 @@ function telegramDeal(search, hit, sourceLabel) {
   row1.push({ text: '🔗 Open listing', url: l.url });
   const keyboard = [row1];
   if (hit.estimate?.cex?.url) keyboard.push([{ text: '💷 CeX', url: hit.estimate.cex.url }]);
-  return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };
+  const out = { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: keyboard } };
+  // With a photo, the text becomes its caption (max 1,024 characters): drop whole lines from the end
+  // rather than cut through HTML tags.
+  if (l.image?.startsWith('http')) {
+    const cap = [...lines];
+    while (cap.join('\n').length > 1000 && cap.length > 1) cap.pop();
+    out.photo = l.image;
+    out.caption = cap.join('\n').slice(0, 1000);
+  }
+  return out;
 }
 
 function telegramSummary(p) {
@@ -168,7 +177,14 @@ export function createNotifier({ db, config, webpush, now, sourceLabel = (s) => 
     }
     if (s.telegramBotToken && s.telegramChatId) {
       const tg = msg.telegram || telegramPlain(msg.push);
-      jobs.push(post(`https://api.telegram.org/bot${s.telegramBotToken}/sendMessage`, { chat_id: s.telegramChatId, ...tg }).then(r => checked(r, 'Telegram')));
+      const api = `https://api.telegram.org/bot${s.telegramBotToken}`;
+      const { photo, caption, ...textMsg } = tg;
+      const sendText = () => post(`${api}/sendMessage`, { chat_id: s.telegramChatId, ...textMsg }).then(r => checked(r, 'Telegram'));
+      // Photo first (faster to judge a deal); if Telegram can't fetch the image, fall back to text.
+      jobs.push(photo
+        ? post(`${api}/sendPhoto`, { chat_id: s.telegramChatId, photo, caption, parse_mode: textMsg.parse_mode, reply_markup: textMsg.reply_markup })
+          .then(r => (r.ok ? 1 : sendText()))
+        : sendText());
     }
     const results = await Promise.allSettled(jobs);
     return results.reduce((n, r) => n + (r.status === 'fulfilled' ? r.value : 0), 0);

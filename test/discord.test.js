@@ -58,8 +58,8 @@ test('Telegram: buttons to open, buy and check CeX, plus a ready-to-copy message
   const buttons = b.reply_markup.inline_keyboard.flat();
   assert.deepEqual(buttons.map(x => x.text), ['🛒 Buy now', '🔗 Open listing', '💷 CeX']);
   assert.equal(b.parse_mode, 'HTML');
-  assert.match(b.text, /<code>Hi! Is this still available\? Would you take £130\?<\/code>/);
-  assert.doesNotMatch(b.text, /collect/i);
+  assert.match(b.caption, /<code>Hi! Is this still available\? Would you take £130\?<\/code>/);
+  assert.doesNotMatch(b.caption, /collect/i);
 });
 
 test('push text: CeX profit when there is no eBay estimate, and a scam warning', () => {
@@ -72,7 +72,7 @@ test('push text: CeX profit when there is no eBay estimate, and a scam warning',
 test('Telegram escapes HTML in listing titles', async () => {
   const { posts, notify } = setup({ telegramBotToken: '1:AB', telegramChatId: '5' });
   await notify({ name: 'S' }, { id: 1, listing: { ...listing, title: '<b>PS5</b> & games' }, estimate: null });
-  assert.match(posts[0].body.text, /&lt;b&gt;PS5&lt;\/b&gt; &amp; games/);
+  assert.match(posts[0].body.caption, /&lt;b&gt;PS5&lt;\/b&gt; &amp; games/);
 });
 
 test('Discord shows the listing description when known (trimmed)', async () => {

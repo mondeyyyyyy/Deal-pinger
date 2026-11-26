@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS searches (
   cexBoxId TEXT, cexName TEXT,
   cexMode TEXT NOT NULL DEFAULT 'auto',
   cexFilter TEXT, cexMinProfit REAL,
+  maxAgeMin INTEGER,
   discordWebhook TEXT,
   messageTemplate TEXT NOT NULL DEFAULT 'Hi! Is this still available? {collect}Would you take {offer}?',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
@@ -62,8 +63,8 @@ const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMentio
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
-const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'intervalSec', 'cexBoxId', 'cexName', 'cexMode', 'cexFilter', 'cexMinProfit', 'discordWebhook', 'messageTemplate'];
-const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride', 'cexBoxId', 'cexName', 'cexFilter', 'cexMinProfit', 'discordWebhook'];
+const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'intervalSec', 'cexBoxId', 'cexName', 'cexMode', 'cexFilter', 'cexMinProfit', 'maxAgeMin', 'discordWebhook', 'messageTemplate'];
+const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride', 'cexBoxId', 'cexName', 'cexFilter', 'cexMinProfit', 'maxAgeMin', 'discordWebhook'];
 
 // Columns added after the first release; added to older databases on startup.
 const MIGRATIONS = [
@@ -78,6 +79,7 @@ const MIGRATIONS = [
   ['hits', 'alerted', 'INTEGER NOT NULL DEFAULT 0'],
   ['searches', 'cexFilter', 'TEXT'],
   ['searches', 'cexMinProfit', 'REAL'],
+  ['searches', 'maxAgeMin', 'INTEGER'],
 ];
 
 function rowToSearch(r) {

@@ -31,8 +31,8 @@ async function api(path, opts = {}) {
 }
 
 let toastTimer = null;
-function toast(msg) {
-  // One toast at a time: a new message replaces the old one.
+function toast(msg, action = null) {
+  // One toast at a time: a new message replaces the old one. An optional action (e.g. Undo) adds a button.
   let t = $('.toast');
   if (!t) {
     t = document.createElement('div');
@@ -40,8 +40,15 @@ function toast(msg) {
     document.body.append(t);
   }
   t.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 'toast-action';
+    b.textContent = action.label;
+    b.addEventListener('click', () => { t.remove(); action.run(); });
+    t.append(b);
+  }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.remove(), 2600);
+  toastTimer = setTimeout(() => t.remove(), action ? 5000 : 2600);
 }
 
 function ago(iso) {
@@ -152,7 +159,23 @@ function renderDeals() {
     $('#firstSearch')?.addEventListener('click', () => { setTab('searches'); openSearchForm(); });
     return;
   }
+  // Newest-first views get Today / Yesterday / date headings; sorted views (best profit, CeX) don't.
+  const grouped = !['profit', 'cex'].includes(dealFilter);
+  const dayOf = (iso) => {
+    const d = new Date(iso.endsWith('Z') || iso.includes('+') ? iso : iso.replace(' ', 'T') + 'Z');
+    const key = d.toDateString();
+    const today = new Date();
+    const yesterday = new Date(Date.now() - 86400000);
+    return key === today.toDateString() ? 'Today' : key === yesterday.toDateString() ? 'Yesterday'
+      : d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+  };
+  let lastDay = null;
   el.innerHTML = list.map((h) => {
+    let heading = '';
+    if (grouped) {
+      const day = dayOf(h.createdAt);
+      if (day !== lastDay) { heading = `<div class="day">${esc(day)}</div>`; lastDay = day; }
+    }
     const l = h.listing;
     const e = h.estimate;
     const chip = (n, label) => `<span class="profit ${n >= 0 ? 'up' : 'down'}">${n >= 0 ? '+' : '−'}${money(Math.abs(n))} ${label}</span>`;
@@ -166,7 +189,7 @@ function renderDeals() {
     const img = l.image && safeUrl(l.image) !== '#' ? `data-img="${esc(l.image)}"` : '';
     const hot = e && e.score >= 50 ? '<span class="hot">🔥 Hot</span>' : '';
     const when = l.postedAt ? `listed ${ago(l.postedAt)}` : `found ${ago(h.createdAt)}`;
-    return `<article class="card" data-id="${h.id}">
+    return `${heading}<article class="card" data-id="${h.id}">
       <div class="deal">
         <a class="thumb" ${img} href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" aria-label="Open listing">${l.image ? '' : 'No photo'}</a>
         <div style="min-width:0">
@@ -239,9 +262,19 @@ $('#deals').addEventListener('click', async (e) => {
     return;
   }
   const status = act === 'dismiss' ? 'dismissed' : hit.status === 'saved' ? 'new' : 'saved';
+  const previous = hit.status;
+  const index = hits.indexOf(hit);
   await api(`/api/hits/${hit.id}`, { method: 'PUT', body: { status } });
   if (status === 'dismissed') hits = hits.filter((h) => h !== hit); else hit.status = status;
   renderDeals();
+  if (status === 'dismissed') {
+    toast('Deal hidden', { label: 'Undo', run: async () => {
+      await api(`/api/hits/${hit.id}`, { method: 'PUT', body: { status: previous } });
+      hit.status = previous;
+      hits.splice(Math.min(index, hits.length), 0, hit);
+      renderDeals();
+    } });
+  }
 });
 
 /* ---------- searches ---------- */
@@ -354,6 +387,11 @@ function openSearchForm(existing = null, { copy = false } = {}) {
         <label class="f"><span>Radius (miles)</span><input class="t" name="radius" inputmode="numeric" value="${v('radius', 25)}"></label>
       </div>
       <label class="f"><span>Check every</span><select class="t" name="intervalSec">${(EVERY.some(([n]) => n === every) ? EVERY : [...EVERY, [every, `${every} seconds`]]).map(([n, l]) => `<option value="${n}" ${n === every ? 'selected' : ''}>${l}${n === 15 ? ' (fastest, for Vinted)' : ''}</option>`).join('')}</select><span class="hint">Vinted can be checked every 15 seconds; eBay, Facebook, Gumtree and Depop at most every 45 seconds.</span></label>
+      <label class="f"><span>Only ping fresh listings</span><select class="t" name="maxAgeMin">
+        ${[['', 'Any age'], [15, 'Posted in the last 15 minutes'], [60, 'Posted in the last hour'], [360, 'Posted in the last 6 hours'], [1440, 'Posted in the last day']]
+          .map(([n, l]) => `<option value="${n}" ${String(src?.maxAgeMin ?? '') === String(n) ? 'selected' : ''}>${l}</option>`).join('')}
+        ${src?.maxAgeMin && ![15, 60, 360, 1440].includes(src.maxAgeMin) ? `<option value="${src.maxAgeMin}" selected>Posted in the last ${src.maxAgeMin} minutes</option>` : ''}
+      </select><span class="hint">Works on Vinted and eBay (with API keys), where the real listing time is known. Older listings still show in your feed.</span></label>
       <label class="f"><span>Skip listings containing (comma separated)</span><input class="t" name="excludeWords" value="${v('excludeWords')}" placeholder="broken, parts, box only, read"></label>
       <div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">Marketplaces</span><div class="srcs">${srcs}</div></div>
       <div class="two" style="margin-top:14px">

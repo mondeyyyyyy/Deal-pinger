@@ -64,6 +64,11 @@ function cleanSearch(body, { partial }) {
     if (v == null || Number.isNaN(v) || v < 15 || v > 3600) return err('Check every must be between 15 seconds and 1 hour');
     out.intervalSec = Math.round(v);
   }
+  if (body.maxAgeMin !== undefined) {
+    const v = num(body.maxAgeMin);
+    if (Number.isNaN(v) || (v != null && (v < 1 || v > 10080))) return err('Fresh listings must be between 1 minute and 7 days');
+    out.maxAgeMin = v == null ? null : Math.round(v);
+  }
   if (body.cexFilter !== undefined) {
     const v = body.cexFilter || null;
     if (v && !['cash', 'voucher'].includes(v)) return err('CeX filter must be cash or voucher');
