@@ -82,6 +82,17 @@ a.btn:not(.primary) { color: var(--text); }
 .warn { color: var(--bad); font-size: 13px; margin-top: 2px; }
 .cexlist .row { cursor: pointer; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 4px; display: block; font-weight: 500; }
+.calc-out { margin-top: 12px; font-size: 18px; font-weight: 700; }
+.calc-out.up { color: var(--good); } .calc-out.down { color: var(--bad); }
+.bars { display: flex; align-items: flex-end; gap: 8px; height: 120px; margin: 8px 0 4px; }
+.bar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.bar i { display: block; width: 100%; border-radius: 6px 6px 0 0; background: var(--accent); min-height: 2px; }
+.bar i.neg { background: var(--bad); }
+.bar b { font-size: 11px; color: var(--muted); margin-top: 4px; font-weight: 600; }
+.bar em { font-size: 11px; font-style: normal; font-weight: 700; margin-bottom: 2px; }
+.mini { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; padding: 6px 0; border-top: 1px solid var(--line); }
+.mini:first-child { border-top: 0; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 600; font-size: inherit; cursor: pointer; }
 .was { color: var(--muted); text-decoration: line-through; font-size: 15px; font-weight: 500; margin-left: 6px; }
 .profit { font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 6px; }
 .profit.up { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
@@ -174,6 +185,27 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
       <div class="stats" id="flipStats"></div>
       <div class="card" id="flips"></div>
       <p style="text-align:center"><a class="linkish" href="/api/flips.csv" download>Export to spreadsheet (CSV)</a></p>
+
+      <div class="section-title">Profit calculator</div>
+      <div class="card" style="padding:14px" id="calc">
+        <div class="two">
+          <label class="f"><span>Buy for (£)</span><input class="t" id="calcBuy" inputmode="decimal" placeholder="100"></label>
+          <label class="f"><span>Sell for (£)</span><input class="t" id="calcSell" inputmode="decimal" placeholder="160"></label>
+        </div>
+        <div class="two">
+          <label class="f" style="margin:0"><span>Selling on</span><select class="t" id="calcFee">
+            <option value="0">eBay (private) or Vinted: 0%</option>
+            <option value="12.8">eBay business: ~12.8%</option>
+            <option value="10">Depop: 10%</option>
+            <option value="settings">My fee in Settings</option>
+          </select></label>
+          <label class="f" style="margin:0"><span>Postage (£)</span><input class="t" id="calcPost" inputmode="decimal" value="4"></label>
+        </div>
+        <div id="calcOut" class="calc-out">Enter a buy and sell price.</div>
+      </div>
+
+      <div class="section-title">Insights</div>
+      <div class="card" style="padding:14px" id="insights"><div class="sub">Loading…</div></div>
     </section>
 
     <section id="tab-settings" class="hidden">
@@ -229,6 +261,8 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
       </div>
       <div class="section-title">Marketplaces</div>
       <div class="card" id="status"></div>
+      <div class="section-title">Blocked sellers</div>
+      <div class="card" id="blocked"></div>
       <div class="section-title">Backup</div>
       <div class="card">
         <div class="row"><div class="grow"><div class="sname">Download a backup</div><div class="sub" style="white-space:normal">Searches, settings and flips (no passwords or tokens)</div></div>

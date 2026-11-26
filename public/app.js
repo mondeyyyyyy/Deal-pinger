@@ -1,4 +1,5 @@
 import { buildMessage, DEFAULT_TEMPLATE } from './messages.js';
+import { profitFor, relistText } from './tools.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -171,7 +172,7 @@ function renderDeals() {
             <div class="title">${esc(l.title)}</div>
           </a>
           <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${scam || hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}${cexChip}</div>
-          <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}</div>
+          <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}${l.sellerId || l.sellerName || l.seller?.name ? ' · <button class="linkbtn" data-act="block">Block seller</button>' : ''}</div>
           ${valueLine ? `<div class="meta">${esc(valueLine)}</div>` : ''}
           <div class="meta"><a class="linkish" data-act="sold" href="${esc(soldUrl(h))}" target="_blank" rel="noopener">Check eBay sold prices ↗</a></div>
           ${l.description ? `<div class="desc">${esc(String(l.description).replace(/\s+/g, ' ').slice(0, 160))}${l.description.length > 160 ? '…' : ''}</div>` : ''}
@@ -213,6 +214,16 @@ $('#deals').addEventListener('click', async (e) => {
     return;
   }
   e.preventDefault();
+  if (act === 'block') {
+    const who = hit.listing.sellerName || hit.listing.seller?.name || 'this seller';
+    if (!confirm(`Block ${who}? You won't see their listings again. (Undo in Settings.)`)) return;
+    try {
+      const r = await api('/api/blocked', { method: 'POST', body: { hitId: hit.id } });
+      toast(`Blocked ${r.blocked}${r.hidden > 1 ? ` and hid ${r.hidden} of their deals` : ''}`);
+      loadDeals();
+    } catch (err) { toast(err.message); }
+    return;
+  }
   if (act === 'bought') {
     const paid = prompt('What did you pay? (£)', hit.listing.price ?? '');
     if (paid == null) return;
@@ -559,6 +570,7 @@ async function loadSettings() {
   $('#quietEnd').value = settings.quietEnd || '';
   $('#feePct').value = settings.feePct || '';
   renderChannels(settings);
+  loadBlocked().catch(() => {});
   $('#scamFilter').value = settings.scamFilter || 'hide';
   $('#tapOpens').value = settings.tapOpens || 'listing';
   $('#digestTime').value = settings.digestTime || '';
@@ -617,6 +629,7 @@ async function loadFlips() {
     <div class="stat"><div class="k">Total profit</div><div class="v ${s.totalProfit >= 0 ? 'up' : 'down'}">${signed(s.totalProfit)}</div></div>
     <div class="stat"><div class="k">In stock</div><div class="v">${s.stockCount}</div><div class="k">${money(s.stockValue)} tied up</div></div>
     <div class="stat"><div class="k">Return on sold</div><div class="v">${s.roiPct == null ? '—' : s.roiPct + '%'}</div><div class="k">${s.soldCount} sold</div></div>`;
+  loadInsights().catch(() => { $('#insights').innerHTML = '<div class="sub">Couldn\'t load insights.</div>'; });
   const el = $('#flips');
   if (!flips.length) {
     el.innerHTML = '<div class="empty"><b>No flips yet</b>Tap <b>Bought</b> on a deal, or + to add one, and track what you make.</div>';
@@ -636,6 +649,40 @@ async function loadFlips() {
     </div>`;
   }).join('');
 }
+
+async function loadInsights() {
+  const i = await api('/api/insights');
+  const max = Math.max(1, ...i.months.map((m) => Math.abs(m.profit)));
+  const monthName = (m) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' });
+  const bars = i.months.map((m) => `<div class="bar" title="${esc(m.month)}"><em>${m.profit ? money(Math.round(m.profit)) : ''}</em>
+    <i class="${m.profit < 0 ? 'neg' : ''}" style="height:${Math.round((Math.abs(m.profit) / max) * 80)}%"></i><b>${esc(monthName(m.month))}</b></div>`).join('');
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const srcRows = i.sources.filter((s) => s.deals || s.bought).map((s) => `<div class="mini" style="display:block"><div>${esc(s.label)}</div><div class="sub" style="white-space:normal">${plural(s.deals, 'deal')} in the last 30 days · ${s.bought} bought${s.profit ? ` · ${money(s.profit)} profit` : ''}</div></div>`).join('');
+  const best = i.bestFlips.map((f) => `<div class="mini"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.title)}</span><b style="color:var(--good)">+${money(f.profit)}</b></div>`).join('');
+  $('#insights').innerHTML = `
+    <div class="sname">Profit by month</div>
+    <div class="bars">${bars}</div>
+    <div class="sname" style="margin-top:14px">Where your deals come from</div>
+    ${srcRows || '<div class="sub">No deals in the last 30 days yet.</div>'}
+    ${best ? `<div class="sname" style="margin-top:14px">Best flips</div>${best}` : ''}`;
+}
+
+let calcFeeSetting = 0;
+function updateCalc() {
+  const n = (id) => { const v = Number(String($(id).value).replace(/[£,\s]/g, '')); return Number.isFinite(v) ? v : NaN; };
+  const buy = n('#calcBuy'), sell = n('#calcSell'), post = n('#calcPost') || 0;
+  const feePct = $('#calcFee').value === 'settings' ? calcFeeSetting : Number($('#calcFee').value);
+  const out = $('#calcOut');
+  if (!$('#calcBuy').value || !$('#calcSell').value || Number.isNaN(buy) || Number.isNaN(sell)) { out.className = 'calc-out'; out.textContent = 'Enter a buy and sell price.'; return; }
+  const r = profitFor({ buy, sell, feePct, postage: post });
+  out.className = `calc-out ${r.profit >= 0 ? 'up' : 'down'}`;
+  out.textContent = `${r.profit >= 0 ? '+' : '−'}${money(Math.abs(r.profit))} profit${r.roiPct != null ? ` · ${r.roiPct}% return` : ''}`;
+}
+['#calcBuy', '#calcSell', '#calcPost', '#calcFee'].forEach((id) => $(id).addEventListener('input', updateCalc));
+$('#calcFee').addEventListener('change', async () => {
+  if ($('#calcFee').value === 'settings') calcFeeSetting = (await api('/api/settings').catch(() => ({}))).feePct || 0;
+  updateCalc();
+});
 
 async function addFlipManually() {
   const title = prompt('What did you buy?');
@@ -671,6 +718,7 @@ function openFlipSheet(f) {
       <label class="f"><span>Fees and postage (£)</span><input class="t" name="fees" inputmode="decimal" value="${esc(f.fees)}"></label>
       <label class="f"><span>Notes</span><textarea class="t" name="notes" rows="2">${esc(f.notes)}</textarea></label>
       ${f.url && safeUrl(f.url) !== '#' ? `<p><a class="linkish" href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener">Open original listing</a></p>` : ''}
+      ${f.soldPrice == null ? '<button type="button" class="btn" style="width:100%;margin-bottom:8px" id="copyListing">📋 Copy listing text to sell it</button>' : ''}
       <div class="err" id="flipErr"></div>
       <button class="btn primary" style="width:100%">Save</button>
       <button type="button" class="btn danger" style="width:100%;margin-top:8px" id="delFlip">Delete</button>
@@ -679,6 +727,14 @@ function openFlipSheet(f) {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(e.target).entries());
     try { await api(`/api/flips/${f.id}`, { method: 'PUT', body }); closeSheet(); loadFlips(); } catch (err) { $('#flipErr').textContent = err.message; }
+  });
+  $('#copyListing')?.addEventListener('click', async () => {
+    const form = $('#flipForm');
+    const t = relistText({ title: form.elements.namedItem('title').value, notes: form.elements.namedItem('notes').value });
+    try {
+      await navigator.clipboard.writeText(`${t.title}\n\n${t.description.split('\n').slice(2).join('\n')}`);
+      toast('Title and description copied. Paste them into eBay or Vinted.');
+    } catch { toast('Couldn\'t copy. Try again.'); }
   });
   $('#delFlip').addEventListener('click', async () => {
     if (!confirm(`Delete "${f.title}"?`)) return;
@@ -689,6 +745,19 @@ function openFlipSheet(f) {
 }
 
 /* ---------- Telegram & Discord ---------- */
+async function loadBlocked() {
+  const list = await api('/api/blocked');
+  $('#blocked').innerHTML = list.length
+    ? list.map((b) => `<div class="row" data-id="${b.id}"><div class="grow"><div class="sname">${esc(b.name || b.sellerId)}</div><div class="sub">${esc(srcLabel(b.source))}</div></div><button class="btn sm" data-act="unblock">Unblock</button></div>`).join('')
+    : '<div class="row"><div class="grow sub" style="white-space:normal">Nobody blocked. Tap "Block seller" on a deal to hide everything from that seller.</div></div>';
+}
+$('#blocked').addEventListener('click', async (e) => {
+  if (e.target.dataset.act !== 'unblock') return;
+  await api(`/api/blocked/${e.target.closest('.row').dataset.id}`, { method: 'DELETE' });
+  toast('Unblocked');
+  loadBlocked();
+});
+
 let lastSettings = null;
 function renderChannels(st) {
   lastSettings = st;

@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS seeded (searchId INTEGER NOT NULL, source TEXT NOT NU
 CREATE TABLE IF NOT EXISTS subscriptions (endpoint TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS blocked_sellers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL, sellerId TEXT, name TEXT,
+  createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS flips (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   hitId INTEGER,
@@ -232,6 +237,26 @@ export function openDb(file) {
     markAlerted(ids) {
       const st = db.prepare('UPDATE hits SET alerted = 1 WHERE id = ?');
       for (const id of ids) st.run(id);
+    },
+    blockSeller({ source, sellerId = null, name = null }) {
+      if (!sellerId && !name) return null;
+      const r = db.prepare('INSERT INTO blocked_sellers (source, sellerId, name) VALUES (?, ?, ?)')
+        .run(source, sellerId != null ? String(sellerId) : null, name ? String(name) : null);
+      return Number(r.lastInsertRowid);
+    },
+    listBlocked() {
+      return db.prepare('SELECT * FROM blocked_sellers ORDER BY id DESC').all();
+    },
+    unblock(id) {
+      db.prepare('DELETE FROM blocked_sellers WHERE id = ?').run(id);
+    },
+    /** Is this listing from a seller you blocked? (by seller id where known, else by username) */
+    isBlocked(listing) {
+      const id = listing.sellerId != null ? String(listing.sellerId) : null;
+      const name = (listing.sellerName || listing.seller?.name || '').toLowerCase() || null;
+      if (!id && !name) return false;
+      return !!db.prepare('SELECT 1 FROM blocked_sellers WHERE source = ? AND ((sellerId IS NOT NULL AND sellerId = ?) OR (name IS NOT NULL AND lower(name) = ?)) LIMIT 1')
+        .get(listing.source, id, name);
     },
     getHit(id) {
       const r = db.prepare('SELECT * FROM hits WHERE id = ?').get(id);

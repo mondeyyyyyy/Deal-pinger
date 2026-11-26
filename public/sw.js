@@ -1,5 +1,5 @@
-const SHELL = 'deal-pinger-shell-v8';
-const ASSETS = ['/', '/index.html', '/app.js', '/messages.js', '/manifest.webmanifest', '/icon-192.png', '/apple-touch-icon.png'];
+const SHELL = 'deal-pinger-shell-v9';
+const ASSETS = ['/', '/index.html', '/app.js', '/messages.js', '/tools.js', '/manifest.webmanifest', '/icon-192.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

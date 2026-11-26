@@ -291,7 +291,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     res.set('content-disposition', `attachment; filename="deal-pinger-backup-${new Date().toISOString().slice(0, 10)}.json"`);
     res.json({ app: 'deal-pinger', version: 1, exportedAt: new Date().toISOString(),
       settings: { quietStart: s.quietStart, quietEnd: s.quietEnd, feePct: s.feePct, scamFilter: s.scamFilter, tapOpens: s.tapOpens, discordMention: s.discordMention },
-      searches, flips });
+      searches, flips, blockedSellers: db.listBlocked().map(({ source, sellerId, name }) => ({ source, sellerId, name })) });
   });
 
   // Restore adds the backup's searches and flips (it never deletes anything) and applies its settings.
@@ -332,6 +332,13 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     try {
       for (const s of cleaned) db.addSearch(s);
       for (const f of flipRows) db.addFlip(f);
+      const key = (x) => `${x.source}|${x.sellerId ?? ''}|${String(x.name ?? '').toLowerCase()}`;
+      const haveBlocked = new Set(db.listBlocked().map(key));
+      for (const x of Array.isArray(b.blockedSellers) ? b.blockedSellers : []) {
+        if (!SOURCE_IDS.includes(x?.source) || (!x.sellerId && !x.name) || haveBlocked.has(key(x))) continue;
+        db.blockSeller({ source: x.source, sellerId: x.sellerId ?? null, name: x.name ?? null });
+        haveBlocked.add(key(x));
+      }
       db.raw.exec('COMMIT');
     } catch (e) {
       db.raw.exec('ROLLBACK');
@@ -347,6 +354,52 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     if (TAP_OPENS.includes(st.tapOpens)) patch.tapOpens = st.tapOpens;
     db.setSettings(patch);
     res.json({ searches: cleaned.length, skipped, flips });
+  });
+
+  // Blocked sellers: their listings never show up again.
+  app.get('/api/blocked', (_req, res) => res.json(db.listBlocked()));
+  app.post('/api/blocked', (req, res) => {
+    const hit = req.body?.hitId != null ? db.getHit(Number(req.body.hitId)) : null;
+    if (!hit) return res.status(404).json({ error: 'Deal not found' });
+    const l = hit.listing;
+    const sellerId = l.sellerId ?? null;
+    const name = l.sellerName || l.seller?.name || null;
+    if (!sellerId && !name) return res.status(400).json({ error: "This marketplace doesn't show who the seller is" });
+    db.blockSeller({ source: l.source, sellerId, name });
+    // Hide their other deals too.
+    const r = db.raw.prepare(`UPDATE hits SET status = 'dismissed' WHERE status IN ('new', 'flagged') AND json_extract(listing, '$.source') = ?
+      AND ((? IS NOT NULL AND json_extract(listing, '$.sellerId') = ?)
+        OR (? IS NOT NULL AND (lower(json_extract(listing, '$.sellerName')) = lower(?) OR lower(json_extract(listing, '$.seller.name')) = lower(?))))`)
+      .run(l.source, sellerId, sellerId != null ? String(sellerId) : null, name, name, name);
+    res.json({ blocked: name || sellerId, hidden: Number(r.changes) });
+  });
+  app.delete('/api/blocked/:id', (req, res) => { db.unblock(Number(req.params.id)); res.status(204).end(); });
+
+  // Insights: profit per month (last 6), where deals and flips come from, best flips.
+  app.get('/api/insights', (_req, res) => {
+    const now = new Date();
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      months.push(d.toISOString().slice(0, 7));
+    }
+    const flips = db.listFlips();
+    const profitOf = (f) => Math.round((f.soldPrice - f.boughtPrice - f.fees) * 100) / 100;
+    const sold = flips.filter(f => f.soldPrice != null && f.soldAt);
+    const monthly = months.map(m => {
+      const inMonth = sold.filter(f => f.soldAt.slice(0, 7) === m);
+      return { month: m, profit: Math.round(inMonth.reduce((a, f) => a + profitOf(f), 0) * 100) / 100, sold: inMonth.length };
+    });
+    const dealRows = db.raw.prepare(`SELECT json_extract(listing, '$.source') AS source, COUNT(*) AS n FROM hits
+      WHERE status NOT IN ('flagged') AND createdAt >= datetime('now', '-30 days') GROUP BY source`).all();
+    const sources = SOURCE_IDS.map(id => ({
+      source: id, label: SOURCES[id].label,
+      deals: dealRows.find(r => r.source === id)?.n ?? 0,
+      bought: flips.filter(f => f.source === id).length,
+      profit: Math.round(sold.filter(f => f.source === id).reduce((a, f) => a + profitOf(f), 0) * 100) / 100,
+    }));
+    const bestFlips = sold.map(f => ({ id: f.id, title: f.title, profit: profitOf(f), source: f.source })).sort((a, b) => b.profit - a.profit).slice(0, 5);
+    res.json({ months: monthly, sources, bestFlips });
   });
 
   app.get('/api/flips', (_req, res) => res.json({ flips: db.listFlips(), summary: db.flipSummary() }));

@@ -70,7 +70,7 @@ export async function runSourceOnce(search, sourceId, deps) {
   if (!current || MATCH_FIELDS.some(k => current[k] !== search[k])) return { newHits: [], error: null };
 
   // Seeded = one successful fetch has happened for this source since the search's filters last changed.
-  const matching = listings.filter(l => matches(l, search));
+  const matching = listings.filter(l => matches(l, search) && !db.isBlocked(l));
   const drops = db.priceDrops(search.id, matching, PRICE_DROP_FRACTION);
   const fresh = db.markSeen(search.id, matching);
   if (firstRun) {

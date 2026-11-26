@@ -21,6 +21,10 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Evening summary** (optional): deals found, the best one, scams hidden and your flip profit, at a time you choose.
 - **Backup and restore** your searches, settings and flips (Settings → Backup). Backups never include passwords or tokens.
 - **Log out all devices** in Settings → Account.
+- **Block a seller** from any Vinted or eBay deal ("Block seller" next to their name). Their listings never show up or ping again; unblock in Settings.
+- **Insights** (Flips tab): profit per month for the last 6 months, which marketplaces your deals and flips come from, and your best flips.
+- **Profit calculator** (Flips tab): buy price, sell price, where you're selling (eBay private/Vinted 0%, eBay business ~12.8%, Depop 10%) and postage give you profit and return.
+- **Copy listing text** on any unsold flip: a cleaned-up title (no "collection only!!" etc.) and a simple description to paste into eBay or Vinted.
 - **Pause all / resume all** searches in one tap (Searches tab), e.g. when you're on holiday. Resume brings back exactly the ones that were running.
 - **No buyer posts or swaps.** "WANTED", "WTB", "Looking for…" and swap-only listings are skipped automatically.
 - **One ping per listing.** If two of your searches catch the same listing, you're pinged once; it still shows under both.
