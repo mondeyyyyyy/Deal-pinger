@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SOURCE_IDS, SOURCES } from './sources/index.js';
-import { median } from './comps.js';
+import { median, robustMedian } from './comps.js';
 import { mainKeywords } from './match.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -175,6 +175,21 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     return req.search ? next() : res.status(404).json({ error: 'Not found' });
   };
 
+  // Pause everything (e.g. on holiday), then resume exactly the searches that were running.
+  app.post('/api/searches/pause-all', (_req, res) => {
+    const running = db.listSearches().filter(s => s.enabled).map(s => s.id);
+    for (const id of running) db.updateSearch(id, { enabled: false });
+    if (running.length) db.cacheSet('pausedAll', running);
+    res.json({ paused: running.length });
+  });
+  app.post('/api/searches/resume-all', (_req, res) => {
+    const ids = db.cacheGet('pausedAll', Infinity) || [];
+    let resumed = 0;
+    for (const id of ids) if (db.getSearch(id)) { db.updateSearch(id, { enabled: true }); resumed++; }
+    db.cacheSet('pausedAll', []);
+    res.json({ resumed });
+  });
+
   app.put('/api/searches/:id', findSearch, (req, res) => {
     const [patch, error] = cleanSearch(req.body || {}, { partial: true });
     if (error) return res.status(400).json({ error });
@@ -192,7 +207,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     const points = db.priceHistory(req.search.id);
     const soldKey = 'sold:' + mainKeywords(req.search.keywords).toLowerCase().trim();
     const sold = db.cacheGet(soldKey, Infinity) || [];
-    res.json({ points, soldMedian: median(sold), soldCount: sold.length, askMedian: median(points.map(p => p.price)) });
+    res.json({ points, soldMedian: robustMedian(sold), soldCount: sold.length, askMedian: median(points.map(p => p.price)) });
   });
 
   app.get('/api/hits', (req, res) => {

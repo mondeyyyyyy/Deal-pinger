@@ -21,6 +21,7 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Evening summary** (optional): deals found, the best one, scams hidden and your flip profit, at a time you choose.
 - **Backup and restore** your searches, settings and flips (Settings → Backup). Backups never include passwords or tokens.
 - **Log out all devices** in Settings → Account.
+- **Pause all / resume all** searches in one tap (Searches tab), e.g. when you're on holiday. Resume brings back exactly the ones that were running.
 - **No buyer posts or swaps.** "WANTED", "WTB", "Looking for…" and swap-only listings are skipped automatically.
 - **One ping per listing.** If two of your searches catch the same listing, you're pinged once; it still shows under both.
 - **Vinted descriptions** are read for new deals and shown on the card and in Discord. The scam filter and seller messages use them too, e.g. "bank transfer only" or "collection only" written in the description.
@@ -28,7 +29,7 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Bursts become one alert.** More than 3 new deals from one check arrive as a single summary, best profit first.
 - **Flips tracker.** Tap **Bought** on a deal, later tap **Sold**, and see profit this month, total profit, stock tied up and return on investment. You can export it all to a spreadsheet.
 - **Price-drop alerts** when a listing you've already seen gets at least 5% cheaper. These show as "£85 → £70".
-- **Profit estimates.** Resale value is the median of recent **eBay UK sold** prices, or your own figure ("I can resell these for £…"). From that, Deal Pinger subtracts your selling fee and postage, then the asking price. The fee defaults to 0%, because private sellers on eBay UK and Vinted pay no selling fees.
+- **Profit estimates.** Resale value is the typical recent **eBay UK sold** price. Only sold listings whose titles match your keywords count; broken, spares/repairs, parts and box-only sales are left out, and extreme outliers are ignored. Or use your own figure ("I can resell these for £…"). From that, Deal Pinger subtracts your selling fee and postage, then the asking price. The fee defaults to 0%, because private sellers on eBay UK and Vinted pay no selling fees.
 - **Sort by best profit**, or filter to saved deals or price drops.
 - **Price history** per search: a chart of asking prices against the eBay sold median.
 - **One-tap seller message.** "Message" copies a message for that listing and opens it, so you just paste and send. It only mentions collecting on Facebook Marketplace and Gumtree (where you collect), or when the listing itself mentions collection or pick-up. On Vinted, Depop and eBay it never does. The default is "Hi! Is this still available? {collect}Would you take {offer}?", where `{offer}` is about 85% of the asking price.

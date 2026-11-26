@@ -238,6 +238,10 @@ async function loadSearches() {
 
 function renderSearches() {
   const el = $('#searches');
+  const anyOn = searches.some((s) => s.enabled);
+  $('#pauseAll').classList.toggle('hidden', !searches.length);
+  $('#pauseAll').textContent = anyOn ? '⏸ Pause all searches' : '▶ Resume all searches';
+  $('#pauseAll').dataset.mode = anyOn ? 'pause' : 'resume';
   if (!searches.length) {
     el.innerHTML = '<div class="empty"><b>No searches yet</b>Tap + to tell Deal Pinger what to watch for.</div>';
     return;
@@ -264,6 +268,18 @@ $('#searches').addEventListener('click', async (e) => {
   const s = searches.find((x) => x.id === Number(row.dataset.id));
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'edit') openSearchForm(s);
+});
+$('#pauseAll').addEventListener('click', async () => {
+  try {
+    if ($('#pauseAll').dataset.mode === 'pause') {
+      const r = await api('/api/searches/pause-all', { method: 'POST' });
+      toast(`Paused ${r.paused} search${r.paused === 1 ? '' : 'es'}. Resume them all here when you're ready.`);
+    } else {
+      const r = await api('/api/searches/resume-all', { method: 'POST' });
+      toast(r.resumed ? `Resumed ${r.resumed} search${r.resumed === 1 ? '' : 'es'}` : 'Switch searches back on with their toggles');
+    }
+    await loadSearches();
+  } catch (err) { toast(err.message); }
 });
 $('#searches').addEventListener('change', async (e) => {
   if (e.target.dataset.act !== 'toggle') return;

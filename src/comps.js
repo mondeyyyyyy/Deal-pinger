@@ -1,4 +1,4 @@
-import { parsePrice, mainKeywords } from './match.js';
+import { parsePrice, mainKeywords, matches } from './match.js';
 
 export function median(nums) {
   const a = nums.filter(n => Number.isFinite(n)).sort((x, y) => x - y);
@@ -16,13 +16,52 @@ const round2 = (n) => Math.round(n * 100) / 100;
  */
 export function estimate(search, listing, soldPrices, { feePct = 0 } = {}) {
   const override = search.resaleOverride ?? null;
-  const value = override ?? median(soldPrices || []);
+  const value = override ?? robustMedian(soldPrices || []);
   if (value == null || listing.price == null) return null;
   const cost = listing.price + (listing.extraCost || 0); // e.g. Vinted's buyer protection fee
   const profit = round2(value * (1 - feePct / 100) - (search.shipEstimate ?? 4) - cost);
   const base = Math.max(listing.price, 1);
   const score = Math.max(0, Math.min(100, Math.round((profit / base) * 100)));
   return { value: round2(value), profit, score, comps: override != null ? 0 : soldPrices.length };
+}
+
+/**
+ * Median that ignores extreme outliers: with 10+ prices, the top and bottom 10% are dropped first
+ * (a 99p mis-sale or a £9,999 joke listing shouldn't move the "usual price").
+ */
+export function robustMedian(nums) {
+  const a = nums.filter(n => Number.isFinite(n)).sort((x, y) => x - y);
+  if (a.length >= 10) {
+    const cut = Math.floor(a.length * 0.1);
+    return median(a.slice(cut, a.length - cut));
+  }
+  return median(a);
+}
+
+// Sold listings that aren't a working item, so they'd drag the "usual price" down.
+const JUNK = 'spare, repair, faulty, for parts, parts only, not working, broken, empty box, box only, cracked, untested, read description, damaged, job lot';
+
+/** Sold prices that genuinely compare: the title matches the keywords and it isn't junk. */
+export function cleanSoldPrices(items, keywords) {
+  return items.filter(i => matches({ title: i.title }, { keywords, excludeWords: JUNK })).map(i => i.price);
+}
+
+/** Sold listings (title + price) from an eBay sold/completed results page (old s-item and new s-card markup). */
+export function parseSoldItems(html) {
+  const out = [];
+  const items = html.split(/<li[^>]+class="[^"]*\bs-(?:item|card)\b/).slice(1);
+  for (const it of items) {
+    if (/Shop on eBay/i.test(it)) continue;
+    const pm = it.match(/class="[^"]*s-(?:item|card)__price[^"]*"[^>]*>([\s\S]*?)<\/span>\s*(?:<\/span>)?/);
+    if (!pm) continue;
+    const text = pm[1].replace(/<[^>]+>/g, '').trim();
+    if (/\bto\b/i.test(text)) continue;
+    const price = parsePrice(text);
+    const title = (it.match(/class="[^"]*s-(?:item|card)__title[^"]*"[^>]*>([\s\S]*?)<\/div>/)?.[1] || '')
+      .replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').replace(/^New listing\s*/i, '').trim();
+    if (price != null && price > 0) out.push({ title, price });
+  }
+  return out;
 }
 
 /** Parse sold prices from an eBay sold/completed search results page (old s-item and new s-card markup). */
@@ -59,7 +98,7 @@ export function createCompsFetcher({ db, fetchFn = fetch }) {
     const url = `https://www.ebay.co.uk/sch/i.html?_nkw=${encodeURIComponent(keywords)}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1&_ipg=60`;
     const res = await fetchFn(url, { headers: { 'user-agent': UA, 'accept-language': 'en-GB' } });
     if (!res.ok) throw new Error(`eBay sold comps HTTP ${res.status}`);
-    const prices = parseSold(await res.text());
+    const prices = cleanSoldPrices(parseSoldItems(await res.text()), keywords);
     db.cacheSet(key, prices);
     return prices;
   }
