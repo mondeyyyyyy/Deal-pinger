@@ -12,6 +12,15 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **CeX prices.** Each deal shows what CeX sells it for and what it pays in cash and voucher, so you can see an instant flip to CeX at a glance. Profit filters and 🔥 use whichever is better: reselling on eBay or cash from CeX. CeX uses the item matching all your keywords, or you can pin the exact CeX item on a search.
 - **Buy now.** Vinted and eBay Buy It Now deals have a Buy now button that goes straight to checkout. eBay auctions are labelled, and likely scams never get a Buy now button.
 - **Real costs.** Vinted's buyer protection fee is counted in the profit.
+- **One search, several names.** Use `|` for alternatives, e.g. `ps5 | playstation 5` or `nike dunk | jordan 1`. Each name is searched, and the results are merged.
+- **Quick-start presets** for popular UK flips (PS5, Switch, iPhone, AirPods, Lego, Nike, Dyson, Steam Deck), with sensible "skip" words already filled in.
+- **Tap straight to checkout** (optional). Settings → Buying can make tapping an alert open Vinted or eBay checkout instead of the listing. This never applies to listings the scam filter is unsure about.
+- **Home Screen badge** showing how many alerts are waiting.
+- **Check eBay sold prices** link on every deal, for a quick sanity check before you buy.
+- **Blocked-site warning.** If a marketplace keeps failing for 30 minutes, usually because it's blocking the server, you get one alert explaining what to do, and another when it's working again.
+- **Evening summary** (optional): deals found, the best one, scams hidden and your flip profit, at a time you choose.
+- **Backup and restore** your searches, settings and flips (Settings → Backup). Backups never include passwords or tokens.
+- **Log out all devices** in Settings → Account.
 - **🔥 Hot deals** (profit at least half the asking price) are flagged in alerts and the feed.
 - **Bursts become one alert.** More than 3 new deals from one check arrive as a single summary, best profit first.
 - **Flips tracker.** Tap **Bought** on a deal, later tap **Sold**, and see profit this month, total profit, stock tied up and return on investment. You can export it all to a spreadsheet.
