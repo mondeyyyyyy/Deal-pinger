@@ -192,6 +192,7 @@ export function createNotifier({ db, config, webpush, now, sourceLabel = (s) => 
     return sendAll(dealMsg(search, hit), search);
   }
   /** Service messages (outage warnings, the daily summary): skipped during quiet hours. */
+  notify.isQuiet = quiet;
   notify.info = (payload) => (quiet() ? Promise.resolve(0) : sendAll({ push: payload }));
   /** Call regularly: once quiet hours are over, say how many deals arrived during them. */
   notify.afterQuiet = async () => {

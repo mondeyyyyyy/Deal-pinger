@@ -27,6 +27,7 @@ export function buildDigest(db) {
 export async function maybeSendDigest(db, notify, { hhmm, date }) {
   const s = db.getSettings();
   if (!s.digestTime || hhmm < s.digestTime || s.lastDigestDate === date) return false;
+  if (notify.isQuiet?.()) return false; // it'll go out as soon as quiet hours end
   db.setSettings({ lastDigestDate: date });
   await (notify.info || notify.sendRaw)(buildDigest(db));
   return true;

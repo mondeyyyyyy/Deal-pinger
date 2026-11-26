@@ -31,8 +31,8 @@ test('restore is all-or-nothing and skips searches you already have', async () =
   const bad = await req('/api/restore', { method: 'POST', body: { searches: [{ keywords: 'new one', sources: ['vinted'] }], flips: [{ title: 'x', boughtPrice: 5, fees: 'lots' }] } });
   assert.equal(bad.status, 400);
   assert.equal(db.listSearches().length, before);
-  const ok = await (await req('/api/restore', { method: 'POST', body: { searches: [{ keywords: 'x', sources: ['vinted'] }, { keywords: 'fresh', sources: ['ebay'] }], flips: [{ title: 'y', boughtPrice: '£5', fees: '£1.50' }] } })).json();
-  assert.equal(ok.searches, 1); // "x" on Vinted already exists
+  const ok = await (await req('/api/restore', { method: 'POST', body: { searches: [{ keywords: 'x', sources: ['vinted'], maxPrice: 1250 }, { keywords: 'fresh', sources: ['ebay'] }], flips: [{ title: 'y', boughtPrice: '£5', fees: '£1.50' }] } })).json();
+  assert.equal(ok.searches, 1); // "x" on Vinted up to £1,250 already exists
   assert.equal(ok.skipped, 1);
   assert.equal(db.listFlips().find(f => f.title === 'y').fees, 1.5);
 });
@@ -60,4 +60,15 @@ test('a random session secret is created once and reused when none is configured
   const c3 = { sessionSecret: 'from-env' };
   ensureSessionSecret(d, c3);
   assert.equal(c3.sessionSecret, 'from-env');
+});
+
+test('restore keeps searches that differ only by price, and never duplicates flips', async () => {
+  db.addSearch({ name: 'cheap', keywords: 'dup-check', sources: ['vinted'], maxPrice: 200 });
+  const r = await (await req('/api/restore', { method: 'POST', body: { searches: [{ keywords: 'dup-check', sources: ['vinted'], minPrice: 200, maxPrice: 400 }], flips: [] } })).json();
+  assert.equal(r.searches, 1);
+  const flip = { title: 'Unique flip', boughtPrice: 50, boughtAt: '2026-11-01 10:00:00' };
+  await req('/api/restore', { method: 'POST', body: { searches: [], flips: [flip] } });
+  const again = await (await req('/api/restore', { method: 'POST', body: { searches: [], flips: [flip] } })).json();
+  assert.equal(again.flips, 0);
+  assert.equal(db.listFlips().filter(f => f.title === 'Unique flip').length, 1);
 });

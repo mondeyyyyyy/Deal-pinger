@@ -95,19 +95,19 @@ export async function withPage(config, fn, { key } = {}) {
 export async function scrapeCards(config, url, hrefSelector, { key } = {}) {
   return withPage(config, async (page) => {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    // A login wall or bot check instead of results means we're blocked: say so (don't report "0 listings").
-    const blockedReason = () => page.evaluate((sel) => {
+    await page.waitForSelector(hrefSelector, { timeout: 15000 }).catch(() => {});
+    // No results after waiting: if the page is clearly a login wall or bot check, report it as blocked
+    // (instead of "0 listings"). Only strong signals count, so a real empty results page stays empty.
+    const blocked = await page.evaluate((sel) => {
       if (document.querySelector(sel)) return null;
-      const text = `${document.title} ${location.href} ${document.body?.innerText?.slice(0, 2000) || ''}`;
-      if (/captcha|just a moment|checking your browser|are you a robot|unusual traffic|access denied|challenge-form/i.test(text + document.body?.innerHTML?.slice(0, 5000))) return 'a bot check (captcha)';
-      if (/log ?in|sign ?in|checkpoint/i.test(`${document.title} ${location.pathname}`) || document.querySelector('input[type=password], input[name=email], input[name=pass]')) return 'a login page';
+      const head = `${document.title} ${location.pathname}`;
+      const visible = (document.body?.innerText || '').slice(0, 3000);
+      if (/captcha|just a moment|attention required|access denied/i.test(head) || /checking your browser|are you a robot|unusual traffic|verify you are (a )?human/i.test(visible)) return 'a bot check (captcha)';
+      if (/log ?in|sign ?in|checkpoint/i.test(head)) return 'a login page';
+      if (document.querySelector('input[type=password]') && visible.length < 1500) return 'a login page';
       return null;
     }, hrefSelector).catch(() => null);
-    const early = await blockedReason();
-    if (early) throw new Error(`Blocked: the site showed ${early} instead of results`);
-    await page.waitForSelector(hrefSelector, { timeout: 15000 }).catch(() => {});
-    const late = await blockedReason();
-    if (late) throw new Error(`Blocked: the site showed ${late} instead of results`);
+    if (blocked) throw new Error(`Blocked: the site showed ${blocked} instead of results`);
     await page.mouse.wheel(0, 2500).catch(() => {});
     await page.waitForTimeout(400);
     return page.$$eval(hrefSelector, (as) => as.map((a) => {

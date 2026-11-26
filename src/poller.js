@@ -124,7 +124,9 @@ export async function runSourceOnce(search, sourceId, deps) {
     const hit = db.addHit(search.id, listing, est, hidden ? 'flagged' : 'new');
     newHits.push(hit);
     // Unknown profit isn't "below the minimum": alert rather than lose the deal for good.
-    const worthIt = search.minProfit == null || !est || est.bestProfit >= search.minProfit;
+    // (An automatic CeX match alone isn't trusted for this: it can be the wrong model.)
+    const profitKnown = est && (prices !== null || search.resaleOverride != null || est.cex?.pinned);
+    const worthIt = search.minProfit == null || !profitKnown || est.bestProfit >= search.minProfit;
     if (worthIt && !hidden) toAlert.push(hit);
   }
   if (toAlert.length) {
@@ -190,19 +192,19 @@ export function startPoller(deps, {
     const label = sources[sourceId]?.label || sourceId;
     const o = outages.get(sourceId);
     const notifier = deps.notify?.info || deps.notify?.sendRaw;
-    const send = (payload) => notifier?.({ url: '/', ...payload }).catch?.(() => {});
+    const send = (payload) => Promise.resolve(notifier?.({ url: '/', ...payload })).catch(() => 0);
     if (!error) {
       if (o?.alerted) send({ title: `${label} is working again`, body: 'Deal Pinger is checking it normally.' });
       outages.delete(sourceId);
       return;
     }
     if (!o) { outages.set(sourceId, { since: now(), alerted: false }); return; }
-    if (!o.alerted && now() - o.since >= OUTAGE_ALERT_MS) {
-      o.alerted = true;
-      send({
+    if (!o.alerted && !o.sending && now() - o.since >= OUTAGE_ALERT_MS) {
+      o.sending = true;
+      Promise.resolve(send({
         title: `${label} isn't working`,
         body: `Failing for ${Math.round((now() - o.since) / 60000)} min: ${String(error.message).slice(0, 120)}. If it says blocked/403, add a UK residential proxy as PROXY_URL in Railway.`,
-      });
+      })).then((n) => { o.alerted = n !== 0; }).finally(() => { o.sending = false; }); // quiet hours: try again later
     }
   }
   // Lets a source run part of its work in another lane, e.g. Vinted's browser fallback.

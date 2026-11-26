@@ -32,3 +32,14 @@ test('a login wall or captcha with no listings is reported as blocked, not as 0 
   const empty = page('<title>Search results</title><p>No results for "zzz"</p>');
   assert.deepEqual(await scrapeCards({ proxyUrl: '' }, empty, 'a[href*="/item/"]', { key: 'test' }), []);
 });
+
+test('real result pages are not mistaken for blocks', async () => {
+  const headerLogin = page(`<title>Marketplace search</title><header><form><input name="email"><input type="password" name="pass"></form></header>
+    <div id="r"></div><script>setTimeout(() => { document.getElementById('r').innerHTML = '<a href="/item/1">£5 One</a>'; }, 300)</script>`);
+  assert.equal((await scrapeCards({ proxyUrl: '' }, headerLogin, 'a[href*="/item/"]', { key: 'test' })).length, 1);
+  const recaptchaScript = page(`<title>Results</title><script src="https://www.google.com/recaptcha/api.js"></script><div id="r"></div>
+    <script>setTimeout(() => { document.getElementById('r').innerHTML = '<a href="/item/2">£5 Two</a>'; }, 300)</script>`);
+  assert.equal((await scrapeCards({ proxyUrl: '' }, recaptchaScript, 'a[href*="/item/"]', { key: 'test' })).length, 1);
+  const zeroWithNewsletter = page('<title>Search results</title><p>No results</p><footer><input name="email" placeholder="Newsletter"></footer>');
+  assert.deepEqual(await scrapeCards({ proxyUrl: '' }, zeroWithNewsletter, 'a[href*="/item/"]', { key: 'test' }), []);
+});

@@ -284,7 +284,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     const b = req.body || {};
     if (!Array.isArray(b.searches) || (b.flips != null && !Array.isArray(b.flips))) return res.status(400).json({ error: 'That isn\'t a Deal Pinger backup' });
     // Check everything first, then write it all in one transaction: a bad backup changes nothing.
-    const sig = (s) => `${String(s.keywords).toLowerCase().trim()}|${[...s.sources].sort().join(',')}`;
+    const sig = (s) => [String(s.keywords).toLowerCase().trim(), [...s.sources].sort().join(','), s.minPrice ?? '', s.maxPrice ?? '', String(s.excludeWords || '').toLowerCase().trim()].join('|');
     const have = new Set(db.listSearches().map(sig));
     const cleaned = [];
     let skipped = 0;
@@ -296,6 +296,8 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
       have.add(sig(s));
       cleaned.push(s);
     }
+    const flipSig = (f) => `${String(f.title).toLowerCase()}|${f.boughtPrice}|${String(f.boughtAt || '').slice(0, 10)}`;
+    const haveFlips = new Set(db.listFlips().map(flipSig));
     const flipRows = [];
     for (const f of b.flips || []) {
       const row = { title: String(f?.title ?? '').trim(), boughtPrice: num(f?.boughtPrice), soldPrice: num(f?.soldPrice), fees: num(f?.fees) ?? 0 };
@@ -307,6 +309,9 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
       flipRows.push({ ...row, source: f.source ?? null, url: f.url ?? null, image: f.image ?? null, notes: String(f.notes ?? ''),
         boughtAt: typeof f.boughtAt === 'string' ? f.boughtAt : undefined,
         soldAt: row.soldPrice != null && typeof f.soldAt === 'string' ? f.soldAt : null });
+      // Restoring the same backup twice mustn't double your flips (or your profit figures).
+      const fs = flipSig(flipRows.at(-1));
+      if (f.boughtAt && haveFlips.has(fs)) flipRows.pop(); else haveFlips.add(fs);
     }
     db.raw.exec('BEGIN');
     try {
