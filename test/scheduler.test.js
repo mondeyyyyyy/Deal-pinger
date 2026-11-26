@@ -139,3 +139,23 @@ test('prices are pre-loaded for each enabled search, then refreshed every few ho
   assert.deepEqual(warmed, ['on', 'on']);
   await p.stop();
 });
+
+test('a marketplace failing for 30+ minutes sends one warning, and one when it recovers', async () => {
+  let fail = true;
+  const fb = { label: 'Facebook Marketplace', search: async () => { if (fail) throw new Error('blocked 403'); return []; } };
+  const d = deps({ fb });
+  const raw = [];
+  d.notify.sendRaw = async (p) => { raw.push(p); return 1; };
+  d.db.addSearch({ name: 's', keywords: 'a', sources: ['fb'], intervalSec: 60 });
+  let now = 0;
+  const p = startPoller(d, { tickMs: 3600000, now: () => now, jitter: 0, log: {} });
+  for (const t of [10, 20, 31, 45]) { now = t * 60000; p.tick(); await sleep(5); }
+  assert.equal(raw.length, 1);
+  assert.match(raw[0].title, /Facebook Marketplace/);
+  assert.match(raw[0].body, /PROXY_URL|proxy/i);
+  fail = false;
+  now = 50 * 60000; p.tick(); await sleep(5);
+  assert.equal(raw.length, 2);
+  assert.match(raw[1].title, /working again/i);
+  await p.stop();
+});

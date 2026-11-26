@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS flips (
 `;
 
 const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'soldPrice', 'soldAt', 'fees', 'notes'];
-const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter', 'tapOpens', 'sessionVersion'];
+const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter', 'tapOpens', 'sessionVersion', 'digestTime', 'lastDigestDate'];
 
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
@@ -234,6 +234,8 @@ export function openDb(file) {
         scamFilter: rows.scamFilter ?? 'hide',
         tapOpens: rows.tapOpens ?? 'listing',
         sessionVersion: rows.sessionVersion ?? '1',
+        digestTime: rows.digestTime ?? null,
+        lastDigestDate: rows.lastDigestDate ?? null,
       };
     },
     setSettings(patch) {

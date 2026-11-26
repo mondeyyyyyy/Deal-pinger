@@ -481,6 +481,12 @@ $('#feePct').addEventListener('change', async () => {
     toast('Selling fee saved');
   } catch (err) { toast(err.message); }
 });
+$('#digestTime').addEventListener('change', async () => {
+  try {
+    await api('/api/settings', { method: 'PUT', body: { digestTime: $('#digestTime').value } });
+    toast($('#digestTime').value ? `Summary every day at ${$('#digestTime').value}` : 'Daily summary off');
+  } catch (err) { toast(err.message); }
+});
 $('#tapOpens').addEventListener('change', async () => {
   try { await api('/api/settings', { method: 'PUT', body: { tapOpens: $('#tapOpens').value } }); toast('Saved'); } catch (err) { toast(err.message); }
 });
@@ -518,6 +524,7 @@ async function loadSettings() {
   renderChannels(settings);
   $('#scamFilter').value = settings.scamFilter || 'hide';
   $('#tapOpens').value = settings.tapOpens || 'listing';
+  $('#digestTime').value = settings.digestTime || '';
   const took = (ms) => (ms == null ? '' : ` · took ${ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's'}`);
   $('#status').innerHTML = status.sources.map((s) => {
     const cls = s.ok === true ? 'ok' : s.ok === false ? 'bad' : '';

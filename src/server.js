@@ -79,6 +79,7 @@ function publicSettings(s) {
     discordMention: s.discordMention,
     scamFilter: s.scamFilter,
     tapOpens: s.tapOpens,
+    digestTime: s.digestTime,
     telegramHasToken: !!s.telegramBotToken,
     telegramConnected: !!(s.telegramBotToken && s.telegramChatId),
   };
@@ -199,7 +200,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
   app.get('/api/settings', (_req, res) => res.json(publicSettings(db.getSettings())));
   app.put('/api/settings', (req, res) => {
     const patch = {};
-    for (const k of ['quietStart', 'quietEnd']) {
+    for (const k of ['quietStart', 'quietEnd', 'digestTime']) {
       if (req.body?.[k] === undefined) continue;
       const v = req.body[k] || null;
       if (v && !HHMM.test(v)) return res.status(400).json({ error: `${k} must be HH:MM` });

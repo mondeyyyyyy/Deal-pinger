@@ -10,6 +10,7 @@ const sellerCache = new Map(); // "source:sellerId" -> { at, info }
 const PRICE_DROP_FRACTION = 0.05; // alert again when a seen listing gets at least 5% cheaper
 const PRUNE_EVERY_MS = 3600 * 1000;
 const WARM_EVERY_MS = 6 * 3600 * 1000;
+const OUTAGE_ALERT_MS = 30 * 60 * 1000;
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
 export function createHealth() {
@@ -170,6 +171,27 @@ export function startPoller(deps, {
   const lastWarm = new Map(); // searchId -> ms
 
   const laneOf = (src) => laneLocks[src.lane] || laneLocks.fetch;
+
+  // If a marketplace keeps failing (usually it's blocking the server), say so once, and again when it's back.
+  const outages = new Map(); // sourceId -> { since, alerted }
+  function watchOutage(sourceId, error) {
+    const label = sources[sourceId]?.label || sourceId;
+    const o = outages.get(sourceId);
+    const send = (payload) => deps.notify?.sendRaw?.({ url: '/', ...payload }).catch?.(() => {});
+    if (!error) {
+      if (o?.alerted) send({ title: `${label} is working again`, body: 'Deal Pinger is checking it normally.' });
+      outages.delete(sourceId);
+      return;
+    }
+    if (!o) { outages.set(sourceId, { since: now(), alerted: false }); return; }
+    if (!o.alerted && now() - o.since >= OUTAGE_ALERT_MS) {
+      o.alerted = true;
+      send({
+        title: `${label} isn't working`,
+        body: `Failing for ${Math.round((now() - o.since) / 60000)} min: ${String(error.message).slice(0, 120)}. If it says blocked/403, add a UK residential proxy as PROXY_URL in Railway.`,
+      });
+    }
+  }
   // Lets a source run part of its work in another lane, e.g. Vinted's browser fallback.
   if (deps.ctx) {
     deps.ctx.inLane = async (lane, fn) => {
@@ -194,6 +216,7 @@ export function startPoller(deps, {
         const r = await runSourceOnce(s, sourceId, deps);
         if (r.newHits.length) log.info?.(`[${s.name}] ${sourceId}: ${r.newHits.length} new`);
         if (r.error) log.warn?.(`[${s.name}] ${sourceId}: ${r.error.message}`);
+        watchOutage(sourceId, r.error);
         return r;
       } catch (e) {
         log.error?.(`[${searchId}] ${sourceId}: ${e.message}`);

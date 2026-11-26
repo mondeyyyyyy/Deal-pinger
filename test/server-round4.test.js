@@ -58,3 +58,9 @@ test('15-second checks allowed; flagged hits can be reviewed', async () => {
   assert.equal(flagged[0].id, h.id);
   assert.equal((await req(`/api/hits/${h.id}`, { method: 'PUT', body: { status: 'new' } })).status, 200);
 });
+
+test('evening summary time is validated and can be switched off', async () => {
+  assert.equal((await req('/api/settings', { method: 'PUT', body: { digestTime: '8pm' } })).status, 400);
+  assert.equal((await (await req('/api/settings', { method: 'PUT', body: { digestTime: '20:30' } })).json()).digestTime, '20:30');
+  assert.equal((await (await req('/api/settings', { method: 'PUT', body: { digestTime: '' } })).json()).digestTime, null);
+});

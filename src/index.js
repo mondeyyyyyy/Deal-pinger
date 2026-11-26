@@ -10,6 +10,8 @@ import { createCex } from './cex.js';
 import { createFetch } from './net.js';
 import { withPage } from './browser.js';
 import { SOURCES, SOURCE_IDS } from './sources/index.js';
+import { maybeSendDigest } from './digest.js';
+import { nowHHMM } from './match.js';
 
 const config = loadConfig();
 if (!config.appPassword) {
@@ -36,10 +38,17 @@ const poller = startPoller(
 );
 
 const app = createApp({ db, config, runNow: poller.runNow, notify, health, linkTelegram: (d) => linkTelegram(d), cex });
+// Evening summary (if switched on in Settings): checked every minute, in UK time.
+const ukDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone }).format(new Date());
+const digestTimer = setInterval(() => {
+  maybeSendDigest(db, notify, { hhmm: nowHHMM(config.timezone), date: ukDate() }).catch((e) => console.warn('digest failed:', e.message));
+}, 60000);
+
 const server = app.listen(config.port, () => console.log(`Deal Pinger listening on :${config.port}`));
 
 async function shutdown() {
   server.close();
+  clearInterval(digestTimer);
   await poller.stop();
   const { closeBrowser } = await import('./browser.js');
   await closeBrowser();
