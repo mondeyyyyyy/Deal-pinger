@@ -23,12 +23,12 @@ function valueParts(e) {
   return parts;
 }
 
-export function formatPush(search, hit, sourceLabel = (s) => s) {
+export function formatPush(search, hit, sourceLabel = (s) => s, { tapOpens = 'listing' } = {}) {
   const l = hit.listing;
   const parts = [sourceLabel(l.source), search.name, ...valueParts(hit.estimate)];
   if (l.location) parts.push(l.location);
   if (risky(l)) parts.push(`⚠️ ${l.scam.reasons.join(', ')}`);
-  return { title: `${lead(hit)} · ${l.title}`, body: parts.join(' · '), url: l.url, image: l.image, hitId: hit.id, tag: `${l.source}:${l.id}` };
+  return { title: `${lead(hit)} · ${l.title}`, body: parts.join(' · '), url: tapOpens === 'buy' && l.buyUrl && !risky(l) ? l.buyUrl : l.url, image: l.image, hitId: hit.id, tag: `${l.source}:${l.id}` };
 }
 
 /** One alert for a burst of hits, best profit first. */
@@ -174,7 +174,7 @@ export function createNotifier({ db, config, webpush, now, sourceLabel = (s) => 
   const quiet = () => inQuietHours(db.getSettings(), clock());
 
   const dealMsg = (search, hit) => ({
-    push: formatPush(search, hit, sourceLabel),
+    push: formatPush(search, hit, sourceLabel, { tapOpens: db.getSettings().tapOpens }),
     discordEmbed: discordDeal(search, hit, sourceLabel),
     telegram: telegramDeal(search, hit, sourceLabel),
   });

@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS flips (
 `;
 
 const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'soldPrice', 'soldAt', 'fees', 'notes'];
-const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter'];
+const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter', 'tapOpens', 'sessionVersion'];
 
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
@@ -180,6 +180,11 @@ export function openDb(file) {
       db.exec('DELETE FROM seeded');
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migratedUk', '1')").run();
     },
+    /** Per search: deals found (not counting hidden scams) and when the last one arrived. */
+    searchStats() {
+      const rows = db.prepare("SELECT searchId, COUNT(*) AS n, MAX(createdAt) AS last FROM hits WHERE status != 'flagged' GROUP BY searchId").all();
+      return Object.fromEntries(rows.map(r => [r.searchId, { hitCount: r.n, lastHitAt: r.last }]));
+    },
     getSettingRaw(key) {
       return db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? null;
     },
@@ -227,6 +232,8 @@ export function openDb(file) {
         telegramChatId: rows.telegramChatId ?? null,
         discordMention: rows.discordMention ?? null,
         scamFilter: rows.scamFilter ?? 'hide',
+        tapOpens: rows.tapOpens ?? 'listing',
+        sessionVersion: rows.sessionVersion ?? '1',
       };
     },
     setSettings(patch) {

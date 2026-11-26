@@ -1,4 +1,4 @@
-import { parsePrice } from './match.js';
+import { parsePrice, mainKeywords } from './match.js';
 
 export function median(nums) {
   const a = nums.filter(n => Number.isFinite(n)).sort((x, y) => x - y);
@@ -45,6 +45,7 @@ const TWELVE_H = 12 * 3600 * 1000;
 
 export function createCompsFetcher({ db, fetchFn = fetch }) {
   return async function getSoldPrices(keywords) {
+    keywords = mainKeywords(keywords);
     const key = 'sold:' + keywords.toLowerCase().trim();
     const cached = db.cacheGet(key, TWELVE_H);
     if (cached) return cached;

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SOURCE_IDS, SOURCES } from './sources/index.js';
 import { median } from './comps.js';
+import { mainKeywords } from './match.js';
 
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const COOKIE = 'dp_session';
@@ -12,6 +13,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const HIT_STATUSES = ['new', 'saved', 'dismissed', 'flagged'];
 const SCAM_FILTERS = ['hide', 'flag', 'off'];
 const CEX_MODES = ['auto', 'off'];
+const TAP_OPENS = ['listing', 'buy'];
 
 const DISCORD_HOOK = /^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
 
@@ -76,6 +78,7 @@ function publicSettings(s) {
     discordConnected: !!s.discordWebhook,
     discordMention: s.discordMention,
     scamFilter: s.scamFilter,
+    tapOpens: s.tapOpens,
     telegramHasToken: !!s.telegramBotToken,
     telegramConnected: !!(s.telegramBotToken && s.telegramChatId),
   };
@@ -93,7 +96,9 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
-  app.use(express.json({ limit: '64kb' }));
+  const smallJson = express.json({ limit: '64kb' });
+  // Restores can be large; that route has its own parser.
+  app.use((req, res, next) => (req.path === '/api/restore' ? next() : smallJson(req, res, next)));
   app.use(cookieParser(config.sessionSecret));
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
@@ -118,17 +123,27 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
       await new Promise(r => setTimeout(r, 400));
       return res.status(401).json({ error: 'Wrong password' });
     }
-    res.cookie(COOKIE, 'ok', { signed: true, httpOnly: true, sameSite: 'lax', secure: req.secure || req.get('x-forwarded-proto') === 'https', maxAge: 1000 * 3600 * 24 * 365 });
+    res.cookie(COOKIE, `v${db.getSettings().sessionVersion}`, { signed: true, httpOnly: true, sameSite: 'lax', secure: req.secure || req.get('x-forwarded-proto') === 'https', maxAge: 1000 * 3600 * 24 * 365 });
     res.json({ ok: true });
   });
 
-  app.use('/api', (req, res, next) => (req.signedCookies[COOKIE] === 'ok' ? next() : res.status(401).json({ error: 'Login required' })));
+  // The cookie carries the current session version; "log out all devices" bumps it.
+  app.use('/api', (req, res, next) => (req.signedCookies[COOKIE] === `v${db.getSettings().sessionVersion}` ? next() : res.status(401).json({ error: 'Login required' })));
+
+  app.post('/api/logout-all', (_req, res) => {
+    db.setSettings({ sessionVersion: String(Number(db.getSettings().sessionVersion) + 1) });
+    res.clearCookie(COOKIE);
+    res.json({ ok: true });
+  });
 
   app.post('/api/logout', (_req, res) => { res.clearCookie(COOKIE); res.json({ ok: true }); });
 
   app.get('/api/sources', (_req, res) => res.json(SOURCE_IDS.map(id => ({ id, label: SOURCES[id].label }))));
 
-  app.get('/api/searches', (_req, res) => res.json(db.listSearches().map(publicSearch)));
+  app.get('/api/searches', (_req, res) => {
+    const stats = db.searchStats();
+    res.json(db.listSearches().map(s => ({ ...publicSearch(s), hitCount: stats[s.id]?.hitCount ?? 0, lastHitAt: stats[s.id]?.lastHitAt ?? null })));
+  });
 
   app.post('/api/searches', (req, res) => {
     const [s, error] = cleanSearch(req.body || {}, { partial: false });
@@ -158,7 +173,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
 
   app.get('/api/searches/:id/history', findSearch, (req, res) => {
     const points = db.priceHistory(req.search.id);
-    const soldKey = 'sold:' + req.search.keywords.toLowerCase().trim();
+    const soldKey = 'sold:' + mainKeywords(req.search.keywords).toLowerCase().trim();
     const sold = db.cacheGet(soldKey, Infinity) || [];
     res.json({ points, soldMedian: median(sold), soldCount: sold.length, askMedian: median(points.map(p => p.price)) });
   });
@@ -196,6 +211,10 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
       if (v && !DISCORD_HOOK.test(v)) return res.status(400).json({ error: 'That isn\'t a Discord webhook link' });
       patch.discordWebhook = v;
     }
+    if (req.body?.tapOpens !== undefined) {
+      if (!TAP_OPENS.includes(req.body.tapOpens)) return res.status(400).json({ error: 'Unknown setting' });
+      patch.tapOpens = req.body.tapOpens;
+    }
     if (req.body?.scamFilter !== undefined) {
       if (!SCAM_FILTERS.includes(req.body.scamFilter)) return res.status(400).json({ error: 'Unknown scam filter setting' });
       patch.scamFilter = req.body.scamFilter;
@@ -226,6 +245,47 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     const q = String(req.query.q || '').trim();
     if (!q) return res.json([]);
     try { res.json((await cex.search(q, 8)).slice(0, 8)); } catch (e) { res.status(502).json({ error: `CeX didn't answer: ${e.message}` }); }
+  });
+
+  // Backup: searches, settings and flips, without any secrets (bot tokens, webhooks).
+  app.get('/api/backup', (_req, res) => {
+    const s = db.getSettings();
+    const searches = db.listSearches().map(({ id, createdAt, discordWebhook, ...rest }) => rest);
+    const flips = db.listFlips().map(({ id, hitId, ...rest }) => rest);
+    res.set('content-disposition', `attachment; filename="deal-pinger-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json({ app: 'deal-pinger', version: 1, exportedAt: new Date().toISOString(),
+      settings: { quietStart: s.quietStart, quietEnd: s.quietEnd, feePct: s.feePct, scamFilter: s.scamFilter, tapOpens: s.tapOpens, discordMention: s.discordMention },
+      searches, flips });
+  });
+
+  // Restore adds the backup's searches and flips (it never deletes anything) and applies its settings.
+  app.post('/api/restore', express.json({ limit: '5mb' }), (req, res) => {
+    const b = req.body || {};
+    if (!Array.isArray(b.searches) || (b.flips != null && !Array.isArray(b.flips))) return res.status(400).json({ error: 'That isn\'t a Deal Pinger backup' });
+    const cleaned = [];
+    for (const raw of b.searches) {
+      const [s, error] = cleanSearch({ ...raw, discordWebhook: undefined }, { partial: false });
+      if (error) return res.status(400).json({ error: `Search "${raw?.name ?? '?'}": ${error}` });
+      cleaned.push(s);
+    }
+    for (const s of cleaned) db.addSearch(s);
+    let flips = 0;
+    for (const f of b.flips || []) {
+      const bought = num(f.boughtPrice);
+      if (!f.title || bought == null || Number.isNaN(bought)) continue;
+      db.addFlip({ title: String(f.title), boughtPrice: bought, source: f.source ?? null, url: f.url ?? null, image: f.image ?? null,
+        soldPrice: num(f.soldPrice) ?? null, soldAt: f.soldAt ?? null, fees: num(f.fees) ?? 0, notes: String(f.notes ?? '') });
+      flips++;
+    }
+    const st = b.settings || {};
+    const patch = {};
+    if (HHMM.test(st.quietStart || '') || st.quietStart === null) patch.quietStart = st.quietStart;
+    if (HHMM.test(st.quietEnd || '') || st.quietEnd === null) patch.quietEnd = st.quietEnd;
+    if (num(st.feePct) >= 0 && num(st.feePct) <= 50) patch.feePct = num(st.feePct);
+    if (SCAM_FILTERS.includes(st.scamFilter)) patch.scamFilter = st.scamFilter;
+    if (TAP_OPENS.includes(st.tapOpens)) patch.tapOpens = st.tapOpens;
+    db.setSettings(patch);
+    res.json({ searches: cleaned.length, flips });
   });
 
   app.get('/api/flips', (_req, res) => res.json({ flips: db.listFlips(), summary: db.flipSummary() }));

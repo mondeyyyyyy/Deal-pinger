@@ -1,4 +1,4 @@
-import { matches } from './match.js';
+import { matches, keywordVariants } from './match.js';
 import { buildEstimate } from './comps.js';
 import { assessScam } from './scam.js';
 
@@ -38,7 +38,20 @@ export async function runSourceOnce(search, sourceId, deps) {
   const firstRun = !db.isSeeded(search.id, sourceId);
   let listings;
   try {
-    listings = await withTimeout(src.search(search, ctx), SOURCE_TIMEOUT_MS, sourceId);
+    // Each "a | b" variant is its own marketplace query; merge the results.
+    const variants = keywordVariants(search.keywords);
+    const fetchAll = async () => {
+      if (variants.length <= 1) return src.search(search, ctx);
+      const seenIds = new Set();
+      const merged = [];
+      for (const v of variants) {
+        for (const l of await src.search({ ...search, keywords: v }, ctx)) {
+          if (!seenIds.has(String(l.id))) { seenIds.add(String(l.id)); merged.push(l); }
+        }
+      }
+      return merged;
+    };
+    listings = await withTimeout(fetchAll(), SOURCE_TIMEOUT_MS, sourceId);
     health?.record(sourceId, { ok: true, count: listings.length, error: null, ms: Date.now() - started });
   } catch (e) {
     health?.record(sourceId, { ok: false, error: e.message, ms: Date.now() - started });

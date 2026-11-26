@@ -10,9 +10,18 @@ export function parsePrice(v) {
 
 const words = (s) => String(s || '').toLowerCase().split(/\s+/).filter(Boolean);
 
+/** "ps5 | playstation 5" → ['ps5', 'playstation 5']: a search can cover several ways of naming an item. */
+export function keywordVariants(keywords) {
+  return String(keywords || '').split('|').map(s => s.trim()).filter(Boolean);
+}
+
+/** The first variant: used for eBay sold prices and CeX matching. */
+export const mainKeywords = (keywords) => keywordVariants(keywords)[0] || '';
+
 export function matches(listing, search) {
   const title = String(listing.title || '').toLowerCase();
-  if (!words(search.keywords).every(w => title.includes(w))) return false;
+  const variants = keywordVariants(search.keywords);
+  if (!variants.some(v => words(v).every(w => title.includes(w)))) return false;
   const excluded = String(search.excludeWords || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
   if (excluded.some(w => title.includes(w))) return false;
   const p = listing.price;

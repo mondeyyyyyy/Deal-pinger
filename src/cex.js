@@ -1,3 +1,5 @@
+import { mainKeywords } from './match.js';
+
 // CeX (uk.webuy.com) prices: what CeX sells an item for, and what it pays in cash or voucher.
 
 const API = 'https://wss2.cex.uk.webuy.io/v3';
@@ -62,10 +64,11 @@ export function createCex({ db, fetchFn }) {
   /** CeX prices for a search: its pinned CeX item, else the best automatic match. Cached for a day. */
   async function forSearch(s) {
     if (s.cexMode === 'off') return null;
-    const key = s.cexBoxId ? `cex:id:${s.cexBoxId}` : `cex:q:${String(s.keywords).toLowerCase().trim()}`;
+    const kw = mainKeywords(s.keywords);
+    const key = s.cexBoxId ? `cex:id:${s.cexBoxId}` : `cex:q:${kw.toLowerCase().trim()}`;
     const cached = db.cacheGet(key, DAY);
     if (cached !== undefined) return cached;
-    const result = s.cexBoxId ? await box(s.cexBoxId) : bestMatch(await search(s.keywords, 20), s.keywords);
+    const result = s.cexBoxId ? await box(s.cexBoxId) : bestMatch(await search(kw, 20), kw);
     db.cacheSet(key, result);
     return result;
   }
