@@ -1,6 +1,6 @@
 # Deal Pinger 🇬🇧
 
-Your own Swoopa-style reselling alert app for the UK. Save searches like "Nintendo Switch under £150 within 10 miles of E8", and Deal Pinger watches **eBay UK, Facebook Marketplace, Vinted, Gumtree and Depop** as often as every 30 seconds. It pings your iPhone (and Telegram or Discord, if you like) the moment a new match is posted, or when a listing you've already seen drops its price. It shows how much profit is in each deal and tracks your flips.
+Your own Swoopa-style reselling alert app for the UK. Save searches like "Nintendo Switch under £150 within 10 miles of E8", and Deal Pinger watches **eBay UK, Facebook Marketplace, Vinted, Gumtree and Depop** as often as every 15 seconds. It pings your iPhone (and Telegram or Discord, if you like) the moment a new match is posted, or when a listing you've already seen drops its price. It shows how much profit is in each deal and tracks your flips.
 
 ## Features
 
@@ -33,7 +33,7 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Quiet hours** (UK time). Deals still collect in your feed.
 - **Marketplace status page**, so you can see when a site is working or blocked.
 - Save or hide deals, pause or **duplicate** searches, "Check now", dark mode, and a password lock.
-- **Real listing times** for Vinted ("listed 40s ago"); other sites show when Deal Pinger found the listing.
+- **Real listing times** for Vinted and eBay with API keys ("listed 40s ago"); other sites show when Deal Pinger found the listing.
 - New and edited searches don't flood you: listings already up are skipped, and only ones posted afterwards ping you.
 - Old data is cleaned up automatically, so it stays quick after months of running.
 

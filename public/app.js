@@ -92,13 +92,23 @@ $('#goSettings').addEventListener('click', (e) => { e.preventDefault(); setTab('
 
 /* ---------- deals ---------- */
 $$('#dealFilter .chip').forEach((c) => c.addEventListener('click', () => {
+  const refetch = ['saved', 'flagged'].includes(dealFilter) || ['saved', 'flagged'].includes(c.dataset.f);
   dealFilter = c.dataset.f;
   $$('#dealFilter .chip').forEach((x) => x.classList.toggle('on', x === c));
-  renderDeals();
+  if (refetch) loadDeals(); else renderDeals();
 }));
 
 async function loadDeals(manual) {
-  hits = await api('/api/hits?limit=200');
+  // Saved and Flagged are fetched on their own, so older saved deals never drop off the list.
+  const status = dealFilter === 'saved' || dealFilter === 'flagged' ? dealFilter : null;
+  try {
+    hits = await api(`/api/hits?limit=200${status ? `&status=${status}` : ''}`);
+  } catch (err) {
+    if (err.message === 'Login required') return;
+    $('#deals').innerHTML = `<div class="empty"><b>Can't reach Deal Pinger</b>${esc(navigator.onLine === false ? 'You\'re offline.' : err.message)}<br><br><button class="btn" id="retryDeals">Try again</button></div>`;
+    $('#retryDeals').addEventListener('click', () => loadDeals(true));
+    return;
+  }
   renderDeals();
   if (manual) toast('Up to date');
 }
@@ -124,8 +134,16 @@ function renderDeals() {
   if (dealFilter === 'flagged') list = hits.filter((h) => h.status === 'flagged');
   const el = $('#deals');
   if (!list.length) {
+    const EMPTY = {
+      saved: ['Nothing saved', 'Tap ☆ on a deal to keep it here.'],
+      profit: ['No profitable deals yet', 'Deals with an estimated profit show here, best first.'],
+      drops: ['No price drops yet', 'When a listing you\'ve seen gets 5% or more cheaper, it shows here.'],
+      flagged: ['No likely scams', 'Listings the scam filter hides show here, so you can double-check them.'],
+      all: ['No deals yet', 'New matches will show up here, and you\'ll get a ping the moment they\'re posted.'],
+    };
+    const [head, text] = EMPTY[dealFilter] || EMPTY.all;
     el.innerHTML = searches.length || dealFilter !== 'all'
-      ? '<div class="empty"><b>No deals yet</b>New matches will show up here, and you\'ll get a ping the moment they\'re posted.</div>'
+      ? `<div class="empty"><b>${head}</b>${text}</div>`
       : '<div class="empty"><b>Add your first search</b>Tell Deal Pinger what you flip and it will watch every marketplace for you.<br><br><button class="btn primary" id="firstSearch">New search</button></div>';
     $('#firstSearch')?.addEventListener('click', () => { setTab('searches'); openSearchForm(); });
     return;
@@ -145,18 +163,20 @@ function renderDeals() {
     const hot = e && e.score >= 50 ? '<span class="hot">🔥 Hot</span>' : '';
     const when = l.postedAt ? `listed ${ago(l.postedAt)}` : `found ${ago(h.createdAt)}`;
     return `<article class="card" data-id="${h.id}">
-      <a class="deal" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">
-        <div class="thumb" ${img}>${l.image ? '' : 'No photo'}</div>
+      <div class="deal">
+        <a class="thumb" ${img} href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" aria-label="Open listing">${l.image ? '' : 'No photo'}</a>
         <div style="min-width:0">
-          <div class="price">${money(l.price)}${l.previousPrice != null ? `<span class="was">${money(l.previousPrice)}</span>` : ''}</div>
-          <div class="title">${esc(l.title)}</div>
+          <a class="dealhead" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener">
+            <div class="price">${money(l.price)}${l.previousPrice != null ? `<span class="was">${money(l.previousPrice)}</span>` : ''}</div>
+            <div class="title">${esc(l.title)}</div>
+          </a>
           <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${scam || hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}${cexChip}</div>
           <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}</div>
           ${valueLine ? `<div class="meta">${esc(valueLine)}</div>` : ''}
           <div class="meta"><a class="linkish" data-act="sold" href="${esc(soldUrl(h))}" target="_blank" rel="noopener">Check eBay sold prices ↗</a></div>
           ${scam ? `<div class="warn">${esc(l.scam.reasons.join(' · '))}</div>` : ''}
         </div>
-      </a>
+      </div>
       <div class="actions">
         ${buy ? `<a class="btn sm primary" data-act="buy" href="${esc(safeUrl(l.buyUrl))}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Buy now</a>` : ''}
         <a class="btn sm ${buy ? '' : 'primary'}" data-act="msg" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Message</a>
@@ -302,7 +322,7 @@ function openSearchForm(existing = null, { copy = false } = {}) {
         <label class="f"><span>Postcode</span><input class="t" name="zip" autocapitalize="characters" value="${v('zip')}" placeholder="SW1A 1AA"></label>
         <label class="f"><span>Radius (miles)</span><input class="t" name="radius" inputmode="numeric" value="${v('radius', 25)}"></label>
       </div>
-      <label class="f"><span>Check every</span><select class="t" name="intervalSec">${EVERY.map(([n, l]) => `<option value="${n}" ${n === every ? 'selected' : ''}>${l}${n === 15 ? ' (fastest, Vinted & eBay)' : ''}</option>`).join('')}</select><span class="hint">Facebook, Gumtree and Depop are checked at most every 45 seconds.</span></label>
+      <label class="f"><span>Check every</span><select class="t" name="intervalSec">${(EVERY.some(([n]) => n === every) ? EVERY : [...EVERY, [every, `${every} seconds`]]).map(([n, l]) => `<option value="${n}" ${n === every ? 'selected' : ''}>${l}${n === 15 ? ' (fastest, for Vinted)' : ''}</option>`).join('')}</select><span class="hint">Vinted can be checked every 15 seconds; eBay, Facebook, Gumtree and Depop at most every 45 seconds.</span></label>
       <label class="f"><span>Skip listings containing (comma separated)</span><input class="t" name="excludeWords" value="${v('excludeWords')}" placeholder="broken, parts, box only, read"></label>
       <div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">Marketplaces</span><div class="srcs">${srcs}</div></div>
       <div class="two" style="margin-top:14px">
