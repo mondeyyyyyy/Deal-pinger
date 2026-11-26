@@ -4,7 +4,7 @@ import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { createApp } from './server.js';
 import { startPoller, createHealth } from './poller.js';
-import { createNotifier, ensureVapid } from './notify.js';
+import { createNotifier, ensureVapid, linkTelegram } from './notify.js';
 import { createCompsFetcher } from './comps.js';
 import { createFetch } from './net.js';
 import { withPage } from './browser.js';
@@ -26,10 +26,10 @@ const getSoldPrices = createCompsFetcher({ db, fetchFn });
 
 const poller = startPoller(
   { db, sources: SOURCES, notify, ctx, getSoldPrices, health },
-  { intervalSec: config.pollIntervalSec },
+  { defaultIntervalSec: config.pollIntervalSec, lanes: { fetch: 4, browser: config.browserConcurrency } },
 );
 
-const app = createApp({ db, config, runNow: poller.runNow, notify, health });
+const app = createApp({ db, config, runNow: poller.runNow, notify, health, linkTelegram: (d) => linkTelegram(d) });
 const server = app.listen(config.port, () => console.log(`Deal Pinger listening on :${config.port}`));
 
 async function shutdown() {

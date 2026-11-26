@@ -116,3 +116,23 @@ test('parseCards dedupes repeated anchors', () => {
   const c = cards.facebook[0];
   assert.equal(parseCards([c, c], { source: 'facebook', idPattern: /\/marketplace\/item\/(\d+)/, urlFor: id => `https://www.facebook.com/marketplace/item/${id}/` }).length, 1);
 });
+
+test('each marketplace declares its lane and minimum interval', () => {
+  assert.equal(SOURCES.ebay.lane, 'fetch');
+  assert.equal(SOURCES.vinted.lane, 'fetch');
+  for (const id of ['facebook', 'gumtree', 'depop']) assert.equal(SOURCES[id].lane, 'browser', id);
+  assert.equal(SOURCES.vinted.minIntervalSec, 20);
+  assert.equal(SOURCES.facebook.minIntervalSec, 45);
+});
+
+test('eBay slows itself down to stay inside the API daily limit', () => {
+  const keys = { ebayAppId: 'a', ebayCertId: 'b' };
+  assert.equal(SOURCES.ebay.minIntervalSec({ searchCount: 1, config: keys }), 45);
+  assert.equal(SOURCES.ebay.minIntervalSec({ searchCount: 10, config: keys }), 192);
+  assert.equal(SOURCES.ebay.minIntervalSec({ searchCount: 10, config: {} }), 45);
+});
+
+test('vinted listing time comes from the photo timestamp', () => {
+  const [l] = SOURCES.vinted.parse({ items: [{ id: 1, title: 't', price: '5', url: '/items/1', photo: { url: 'https://i/x', high_resolution: { timestamp: 1764100000 } } }] });
+  assert.equal(l.postedAt, new Date(1764100000 * 1000).toISOString());
+});

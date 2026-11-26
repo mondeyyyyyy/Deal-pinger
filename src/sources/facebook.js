@@ -3,6 +3,8 @@ import { scrapeCards } from '../browser.js';
 
 export const id = 'facebook';
 export const label = 'Facebook Marketplace';
+export const lane = 'browser';
+export const minIntervalSec = 45;
 
 export function parse(cards) {
   return parseCards(cards, {
@@ -22,5 +24,5 @@ export function buildUrl(search, config) {
 }
 
 export async function search(s, ctx) {
-  return parse(await scrapeCards(ctx.config, buildUrl(s, ctx.config), 'a[href*="/marketplace/item/"]'));
+  return parse(await scrapeCards(ctx.config, buildUrl(s, ctx.config), 'a[href*="/marketplace/item/"]', { key: id }));
 }

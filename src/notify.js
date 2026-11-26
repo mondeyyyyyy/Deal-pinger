@@ -1,45 +1,120 @@
 import { inQuietHours, nowHHMM } from './match.js';
 
+const HOT_SCORE = 50; // profit at least half the asking price
+const SUMMARY_OVER = 3; // more alertable hits than this from one check → one summary alert
+const money = (n) => `£${n}`;
+
 export function formatPush(search, hit, sourceLabel = (s) => s) {
   const l = hit.listing;
-  const price = l.price == null ? '?' : `£${l.price}`;
-  const lead = l.previousPrice != null ? `Price drop £${l.previousPrice} → ${price}` : price;
+  const price = l.price == null ? '?' : money(l.price);
+  const hot = hit.estimate && hit.estimate.score >= HOT_SCORE ? '🔥 ' : '';
+  const lead = l.previousPrice != null ? `Price drop ${money(l.previousPrice)} → ${price}` : price;
   const parts = [sourceLabel(l.source), search.name];
   if (hit.estimate) {
     const p = hit.estimate.profit;
     parts.push(`${p >= 0 ? '+' : '-'}£${Math.abs(p)} profit (resells ~£${hit.estimate.value})`);
   }
   if (l.location) parts.push(l.location);
-  return { title: `${lead} · ${l.title}`, body: parts.join(' · '), url: l.url, image: l.image, hitId: hit.id, tag: `${l.source}:${l.id}` };
+  return { title: `${hot}${lead} · ${l.title}`, body: parts.join(' · '), url: l.url, image: l.image, hitId: hit.id, tag: `${l.source}:${l.id}` };
 }
 
-export function createNotifier({ db, config, webpush, now, sourceLabel }) {
+/** One alert for a burst of hits, best profit first. */
+export function formatSummary(search, hits, sourceLabel = (s) => s) {
+  const ranked = [...hits].sort((a, b) => (b.estimate?.profit ?? -Infinity) - (a.estimate?.profit ?? -Infinity));
+  const line = (h) => `${h.listing.price == null ? '?' : money(h.listing.price)} ${h.listing.title}`;
+  return {
+    title: `${hits.length} new deals · ${search.name}`,
+    body: ranked.slice(0, 3).map(line).join(' · '),
+    url: '/',
+    tag: `summary:${search.id ?? search.name}`,
+    items: ranked.map(h => ({ title: line(h), url: h.listing.url, source: sourceLabel(h.listing.source) })),
+  };
+}
+
+function discordBody(p) {
+  if (p.items) {
+    return { content: `**${p.title}**\n` + p.items.slice(0, 10).map(i => `• [${i.title}](${i.url}) · ${i.source}`).join('\n') };
+  }
+  const embed = { title: p.title.slice(0, 256), description: p.body, url: p.url?.startsWith('http') ? p.url : undefined };
+  if (p.image?.startsWith('http')) embed.thumbnail = { url: p.image };
+  return { embeds: [embed] };
+}
+
+function telegramText(p) {
+  if (p.items) return `${p.title}\n\n` + p.items.slice(0, 10).map(i => `• ${i.title} (${i.source})\n${i.url}`).join('\n');
+  return [p.title, p.body, p.url?.startsWith('http') ? p.url : null].filter(Boolean).join('\n');
+}
+
+export function createNotifier({ db, config, webpush, now, sourceLabel, fetchFn = fetch }) {
   if (config.vapidPublicKey && config.vapidPrivateKey) {
     webpush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
   }
   const clock = now || (() => nowHHMM(config.timezone));
+  const post = (url, body) => fetchFn(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  });
 
-  async function sendRaw(payload) {
+  async function sendPush(payload) {
     if (!config.vapidPublicKey) return 0;
-    let sent = 0;
-    for (const sub of db.listSubscriptions()) {
+    const results = await Promise.all(db.listSubscriptions().map(async (sub) => {
       try {
         await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: 'high', timeout: 10000 });
-        sent++;
+        return 1;
       } catch (e) {
         // 404/410: subscription gone; 403: it was made with different VAPID keys.
         if ([403, 404, 410].includes(e.statusCode)) db.removeSubscription(sub.endpoint);
+        return 0;
       }
-    }
-    return sent;
+    }));
+    return results.reduce((a, b) => a + b, 0);
   }
 
+  /** Send to every configured channel at once. Returns how many deliveries succeeded. */
+  async function sendRaw(payload) {
+    const s = db.getSettings();
+    const jobs = [sendPush(payload)];
+    if (s.discordWebhook) jobs.push(post(s.discordWebhook, discordBody(payload)).then(r => (r.ok ? 1 : 0)));
+    if (s.telegramBotToken && s.telegramChatId) {
+      jobs.push(post(`https://api.telegram.org/bot${s.telegramBotToken}/sendMessage`, {
+        chat_id: s.telegramChatId, text: telegramText(payload), disable_web_page_preview: false,
+      }).then(r => (r.ok ? 1 : 0)));
+    }
+    const results = await Promise.allSettled(jobs);
+    return results.reduce((n, r) => n + (r.status === 'fulfilled' ? r.value : 0), 0);
+  }
+
+  const quiet = () => inQuietHours(db.getSettings(), clock());
+
   async function notify(search, hit, { force = false } = {}) {
-    if (!force && inQuietHours(db.getSettings(), clock())) return 0;
+    if (!force && quiet()) return 0;
     return sendRaw(formatPush(search, hit, sourceLabel));
   }
+  notify.batch = async (search, hits) => {
+    if (!hits.length || quiet()) return 0;
+    if (hits.length > SUMMARY_OVER) return sendRaw(formatSummary(search, hits, sourceLabel));
+    let n = 0;
+    for (const h of hits) n += await sendRaw(formatPush(search, h, sourceLabel));
+    return n;
+  };
   notify.sendRaw = sendRaw;
   return notify;
+}
+
+/** After the user sends /start to their bot, find that chat and save it. Returns the chat id. */
+export async function linkTelegram(db, fetchFn = fetch) {
+  const { telegramBotToken } = db.getSettings();
+  if (!telegramBotToken) throw new Error('Add your Telegram bot token first');
+  const res = await fetchFn(`https://api.telegram.org/bot${telegramBotToken}/getUpdates`, { signal: AbortSignal.timeout(10000) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.ok) throw new Error('Telegram rejected the bot token');
+  const chats = (j.result || []).map(u => (u.message || u.edited_message || u.channel_post)?.chat?.id).filter(id => id != null);
+  if (!chats.length) throw new Error('Send /start to your bot in Telegram, then try again');
+  const chatId = String(chats.at(-1));
+  db.setSettings({ telegramChatId: chatId });
+  return chatId;
 }
 
 /** Use VAPID keys from env; otherwise load (or create once) keys stored in the database. Mutates config. */

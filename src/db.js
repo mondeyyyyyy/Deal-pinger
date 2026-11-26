@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS searches (
   minProfit REAL,
   shipEstimate REAL NOT NULL DEFAULT 4,
   resaleOverride REAL,
+  intervalSec INTEGER NOT NULL DEFAULT 60,
   messageTemplate TEXT NOT NULL DEFAULT 'Hi! Is this still available? I can collect today for {offer}.',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -32,16 +33,33 @@ CREATE TABLE IF NOT EXISTS seeded (searchId INTEGER NOT NULL, source TEXT NOT NU
 CREATE TABLE IF NOT EXISTS subscriptions (endpoint TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS flips (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  hitId INTEGER,
+  title TEXT NOT NULL,
+  source TEXT, url TEXT, image TEXT,
+  boughtPrice REAL NOT NULL,
+  boughtAt TEXT NOT NULL DEFAULT (datetime('now')),
+  soldPrice REAL, soldAt TEXT,
+  fees REAL NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT ''
+);
 `;
+
+const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'soldPrice', 'soldAt', 'fees', 'notes'];
+const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'telegramBotToken', 'telegramChatId'];
 
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
-const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'messageTemplate'];
+const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'intervalSec', 'messageTemplate'];
 const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride'];
 
 // Columns added after the first release; added to older databases on startup.
-const MIGRATIONS = [['searches', 'resaleOverride', 'REAL']];
+const MIGRATIONS = [
+  ['searches', 'resaleOverride', 'REAL'],
+  ['searches', 'intervalSec', 'INTEGER NOT NULL DEFAULT 60'],
+];
 
 function rowToSearch(r) {
   if (!r) return null;
@@ -166,13 +184,63 @@ export function openDb(file) {
     },
     getSettings() {
       const rows = Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(r => [r.key, r.value]));
-      return { quietStart: rows.quietStart ?? null, quietEnd: rows.quietEnd ?? null, feePct: Number(rows.feePct ?? 0) };
+      return {
+        quietStart: rows.quietStart ?? null,
+        quietEnd: rows.quietEnd ?? null,
+        feePct: Number(rows.feePct ?? 0),
+        discordWebhook: rows.discordWebhook ?? null,
+        telegramBotToken: rows.telegramBotToken ?? null,
+        telegramChatId: rows.telegramChatId ?? null,
+      };
     },
     setSettings(patch) {
       const st = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-      for (const k of ['quietStart', 'quietEnd']) if (k in patch) st.run(k, patch[k] || null);
+      for (const k of SETTING_KEYS) if (k in patch) st.run(k, patch[k] || null);
       if ('feePct' in patch) st.run('feePct', String(Number(patch.feePct) || 0));
       return this.getSettings();
+    },
+    addFlip(f) {
+      const keys = FLIP_FIELDS.filter(k => f[k] !== undefined);
+      const r = db.prepare(`INSERT INTO flips (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
+        .run(...keys.map(k => f[k]));
+      return this.getFlip(r.lastInsertRowid);
+    },
+    getFlip(id) {
+      return db.prepare('SELECT * FROM flips WHERE id = ?').get(id) || null;
+    },
+    listFlips() {
+      return db.prepare('SELECT * FROM flips ORDER BY (soldPrice IS NOT NULL), id DESC').all();
+    },
+    updateFlip(id, patch) {
+      const p = { ...patch };
+      if (p.soldPrice != null && p.soldAt === undefined && !this.getFlip(id)?.soldAt) p.soldAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      if (p.soldPrice === null) p.soldAt = null;
+      const keys = FLIP_FIELDS.filter(k => p[k] !== undefined);
+      if (keys.length) db.prepare(`UPDATE flips SET ${keys.map(k => `${k} = ?`).join(',')} WHERE id = ?`).run(...keys.map(k => p[k]), id);
+      return this.getFlip(id);
+    },
+    deleteFlip(id) {
+      db.prepare('DELETE FROM flips WHERE id = ?').run(id);
+    },
+    /** Stock still held, and profit on sold flips (profit = sold - bought - fees). */
+    flipSummary() {
+      const r = db.prepare(`SELECT
+          SUM(CASE WHEN soldPrice IS NULL THEN 1 ELSE 0 END) AS stockCount,
+          COALESCE(SUM(CASE WHEN soldPrice IS NULL THEN boughtPrice END), 0) AS stockValue,
+          SUM(CASE WHEN soldPrice IS NOT NULL THEN 1 ELSE 0 END) AS soldCount,
+          COALESCE(SUM(CASE WHEN soldPrice IS NOT NULL THEN soldPrice - boughtPrice - fees END), 0) AS totalProfit,
+          COALESCE(SUM(CASE WHEN soldPrice IS NOT NULL THEN boughtPrice END), 0) AS soldCost,
+          COALESCE(SUM(CASE WHEN soldPrice IS NOT NULL AND soldAt >= strftime('%Y-%m-01', 'now') THEN soldPrice - boughtPrice - fees END), 0) AS monthProfit
+        FROM flips`).get();
+      const round = (n) => Math.round(n * 100) / 100;
+      return {
+        stockCount: r.stockCount || 0,
+        stockValue: round(r.stockValue),
+        soldCount: r.soldCount || 0,
+        totalProfit: round(r.totalProfit),
+        monthProfit: round(r.monthProfit),
+        roiPct: r.soldCost > 0 ? Math.round((r.totalProfit / r.soldCost) * 100) : null,
+      };
     },
     cacheGet(key, maxAgeMs) {
       const r = db.prepare('SELECT value, at FROM cache WHERE key = ?').get(key);

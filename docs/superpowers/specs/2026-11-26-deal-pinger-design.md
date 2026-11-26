@@ -71,3 +71,16 @@ a resale marketplace, so they can reach the seller before other flippers.
 - Price-drop alerts: a previously seen matching listing whose price falls by ≥5% alerts again.
 - Feed sort by best profit. Old data pruned (seen > 45 days, non-saved hits > 60 days).
 - "make it better" skill requested by user does not exist; improvements chosen by builder.
+
+## Speed + features round (requested 2026-11-26)
+- **Scheduler:** jobs per (search, source). Lanes: `fetch` (eBay, Vinted; concurrency 4) and
+  `browser` (Facebook, Gumtree, Depop; concurrency `BROWSER_CONCURRENCY`, default 2). A job never
+  overlaps itself. Per-search "check every" 30/60/120/300s (default 60). Source minimum intervals:
+  Vinted 20s, browser sites 45s, eBay 45s raised automatically to stay under the Browse API's
+  ~5,000 calls/day when keys are set.
+- Comps never delay an alert by more than 2.5s; slower lookups finish in the background and cache.
+- Browser: skip images/media/fonts, shorter waits, one warm context per site.
+- Extra channels: Discord webhook and Telegram bot (link by sending /start to the bot).
+- More than 3 alertable hits from one job → one summary push. Score ≥ 50 → 🔥 prefix.
+- Flips tracker: bought/sold with fees, summary (stock, month profit, total, ROI), CSV export.
+- Duplicate search; Vinted postedAt from photo timestamp; status shows last run + duration.

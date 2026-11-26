@@ -181,13 +181,13 @@ test('renaming or pausing a search keeps seeding', async () => {
   assert.equal(sent.length, 1);
 });
 
-test('poller runs searches one at a time even when runNow overlaps', async () => {
+test('the same search+source never runs twice at once, even when runNow overlaps', async () => {
   const { startPoller } = await import('../src/poller.js');
   const { db, search, deps } = setup();
   let active = 0, maxActive = 0;
   deps.sources.a.search = async () => { active++; maxActive = Math.max(maxActive, active); await new Promise(r => setTimeout(r, 30)); active--; return []; };
   deps.sources.b.search = async () => [];
-  const p = startPoller(deps, { intervalSec: 3600, log: {} });
+  const p = startPoller(deps, { tickMs: 3600000, log: {} });
   await Promise.all([p.runNow(search.id), p.runNow(search.id)]);
   await p.stop();
   assert.equal(maxActive, 1);
@@ -219,6 +219,6 @@ test('price drop on an already-seen listing alerts with the old price', async ()
 test('push text uses pounds and calls out price drops', async () => {
   const { formatPush } = await import('../src/notify.js');
   const p = formatPush({ name: 'Switch' }, { id: 1, listing: { ...L('vinted', '1', 40, 'Switch Lite'), previousPrice: 55 }, estimate: { value: 90, profit: 46, score: 50 } });
-  assert.match(p.title, /^Price drop £55 → £40 · Switch Lite/);
+  assert.match(p.title, /^🔥 Price drop £55 → £40 · Switch Lite/);
   assert.match(p.body, /\+£46 profit \(resells ~£90\)/);
 });

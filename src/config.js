@@ -15,7 +15,8 @@ export function loadConfig(env = process.env) {
     ebayCertId: env.EBAY_CERT_ID || '',
     facebookLocation: env.FACEBOOK_LOCATION || 'london',
     proxyUrl: env.PROXY_URL || '',
-    pollIntervalSec: Number(env.POLL_INTERVAL_SEC || 90),
+    pollIntervalSec: Number(env.POLL_INTERVAL_SEC || 60),
+    browserConcurrency: Number(env.BROWSER_CONCURRENCY || 2),
     timezone: env.TZ || 'Europe/London',
   };
 }

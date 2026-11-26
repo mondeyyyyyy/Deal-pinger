@@ -27,12 +27,18 @@ async function api(path, opts = {}) {
   return data;
 }
 
+let toastTimer = null;
 function toast(msg) {
-  const t = document.createElement('div');
-  t.className = 'toast';
+  // One toast at a time: a new message replaces the old one.
+  let t = $('.toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.className = 'toast';
+    document.body.append(t);
+  }
   t.textContent = msg;
-  document.body.append(t);
-  setTimeout(() => t.remove(), 2400);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), 2600);
 }
 
 function ago(iso) {
@@ -59,7 +65,7 @@ $('#loginForm').addEventListener('submit', async (e) => {
 });
 
 /* ---------- tabs ---------- */
-const TITLES = { deals: 'Deals', searches: 'Searches', settings: 'Settings' };
+const TITLES = { deals: 'Deals', searches: 'Searches', flips: 'Flips', settings: 'Settings' };
 const REFRESH_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
 const PLUS_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 
@@ -70,14 +76,16 @@ function setTab(t) {
   $('#title').textContent = TITLES[t];
   const hb = $('#headerAction');
   hb.classList.toggle('hidden', t === 'settings');
-  hb.innerHTML = t === 'searches' ? PLUS_ICON : REFRESH_ICON;
-  hb.setAttribute('aria-label', t === 'searches' ? 'New search' : 'Refresh');
+  const adds = t === 'searches' || t === 'flips';
+  hb.innerHTML = adds ? PLUS_ICON : REFRESH_ICON;
+  hb.setAttribute('aria-label', t === 'searches' ? 'New search' : t === 'flips' ? 'Add a flip' : 'Refresh');
   if (t === 'settings') loadSettings();
+  if (t === 'flips') loadFlips();
   if (t === 'searches') loadSearches();
   if (t === 'deals') loadDeals();
 }
 $$('nav.tabs button').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
-$('#headerAction').addEventListener('click', () => (tab === 'searches' ? openSearchForm() : loadDeals(true)));
+$('#headerAction').addEventListener('click', () => (tab === 'searches' ? openSearchForm() : tab === 'flips' ? addFlipManually() : loadDeals(true)));
 $('#goSettings').addEventListener('click', (e) => { e.preventDefault(); setTab('settings'); });
 
 /* ---------- deals ---------- */
@@ -119,20 +127,23 @@ function renderDeals() {
     const e = h.estimate;
     const profit = e ? `<span class="profit ${e.profit >= 0 ? 'up' : 'down'}">${e.profit >= 0 ? '+' : '−'}${money(Math.abs(e.profit))} profit</span>` : '';
     const img = l.image && safeUrl(l.image) !== '#' ? `data-img="${esc(l.image)}"` : '';
+    const hot = e && e.score >= 50 ? '<span class="hot">🔥 Hot</span>' : '';
+    const when = l.postedAt ? `listed ${ago(l.postedAt)}` : `found ${ago(h.createdAt)}`;
     return `<article class="card" data-id="${h.id}">
       <a class="deal" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">
         <div class="thumb" ${img}>${l.image ? '' : 'No photo'}</div>
         <div style="min-width:0">
           <div class="price">${money(l.price)}${l.previousPrice != null ? `<span class="was">${money(l.previousPrice)}</span>` : ''}</div>
           <div class="title">${esc(l.title)}</div>
-          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}</div>
-          <div class="meta">${esc(ago(h.createdAt))}${l.location ? ' · ' + esc(l.location) : ''}${e ? ' · resells ~' + money(e.value) : ''}</div>
+          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}</div>
+          <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${e ? ' · resells ~' + money(e.value) : ''}</div>
         </div>
       </a>
       <div class="actions">
         <a class="btn sm primary" data-act="msg" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Message</a>
         <button class="btn sm" data-act="save">${h.status === 'saved' ? 'Saved ✓' : 'Save'}</button>
-        <button class="btn sm" data-act="dismiss" aria-label="Dismiss">Hide</button>
+        <button class="btn sm" data-act="bought">Bought</button>
+        <button class="btn sm x" data-act="dismiss" aria-label="Hide">✕</button>
       </div>
     </article>`;
   }).join('');
@@ -151,6 +162,17 @@ $('#deals').addEventListener('click', async (e) => {
     return;
   }
   e.preventDefault();
+  if (act === 'bought') {
+    const paid = prompt('What did you pay? (£)', hit.listing.price ?? '');
+    if (paid == null) return;
+    try {
+      await api('/api/flips', { method: 'POST', body: { hitId: hit.id, boughtPrice: paid } });
+      hit.status = 'saved';
+      renderDeals();
+      toast('Added to Flips. Mark it sold when it goes.');
+    } catch (err) { toast(err.message); }
+    return;
+  }
   const status = act === 'dismiss' ? 'dismissed' : hit.status === 'saved' ? 'new' : 'saved';
   await api(`/api/hits/${hit.id}`, { method: 'PUT', body: { status } });
   if (status === 'dismissed') hits = hits.filter((h) => h !== hit); else hit.status = status;
@@ -177,7 +199,7 @@ function renderSearches() {
     return `<div class="row" data-id="${s.id}">
       <div class="grow" data-act="edit" style="cursor:pointer">
         <div class="sname">${esc(s.name)}</div>
-        <div class="sub">${esc(s.keywords)}${price} · ${s.sources.map(srcLabel).map(esc).join(', ')}</div>
+        <div class="sub">${esc(s.keywords)}${price} · every ${everyLabel(s.intervalSec)} · ${s.sources.map(srcLabel).map(esc).join(', ')}</div>
       </div>
       <label class="switch"><input type="checkbox" data-act="toggle" ${s.enabled ? 'checked' : ''}><span></span></label>
     </div>`;
@@ -206,11 +228,21 @@ function openSheet(html) {
 function closeSheet() { $('#sheet').classList.add('hidden'); }
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet' || e.target.closest('[data-close]')) closeSheet(); });
 
-function openSearchForm(s = null) {
-  const v = (k, d = '') => esc(s?.[k] ?? d);
-  const srcs = SOURCES.map((x) => `<label><input type="checkbox" name="sources" value="${x.id}" ${!s || s.sources.includes(x.id) ? 'checked' : ''}> ${esc(x.label)}</label>`).join('');
+const EVERY = [[30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [900, '15 minutes']];
+function everyLabel(sec) {
+  const hit = EVERY.find(([n]) => n === sec);
+  return hit ? hit[1].replace(' seconds', 's').replace(' minutes', ' min').replace(' minute', ' min') : `${sec}s`;
+}
+
+function openSearchForm(existing = null, { copy = false } = {}) {
+  // A copy starts as a new search pre-filled from an existing one.
+  const s = copy ? null : existing;
+  const src = existing;
+  const v = (k, d = '') => esc((k === 'name' && copy ? `${src.name} (copy)` : src?.[k]) ?? d);
+  const every = src?.intervalSec ?? 60;
+  const srcs = SOURCES.map((x) => `<label><input type="checkbox" name="sources" value="${x.id}" ${!src || src.sources.includes(x.id) ? 'checked' : ''}> ${esc(x.label)}</label>`).join('');
   openSheet(`
-    <h2>${s ? 'Edit search' : 'New search'} <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
+    <h2>${s ? 'Edit search' : copy ? 'Copy of search' : 'New search'} <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
     <form id="searchForm">
       <label class="f"><span>What are you looking for?</span><input class="t" name="keywords" value="${v('keywords')}" placeholder="nintendo switch oled" required></label>
       <label class="f"><span>Name (optional)</span><input class="t" name="name" value="${v('name')}" placeholder="Switch flips"></label>
@@ -222,6 +254,7 @@ function openSearchForm(s = null) {
         <label class="f"><span>Postcode</span><input class="t" name="zip" autocapitalize="characters" value="${v('zip')}" placeholder="SW1A 1AA"></label>
         <label class="f"><span>Radius (miles)</span><input class="t" name="radius" inputmode="numeric" value="${v('radius', 25)}"></label>
       </div>
+      <label class="f"><span>Check every</span><select class="t" name="intervalSec">${EVERY.map(([n, l]) => `<option value="${n}" ${n === every ? 'selected' : ''}>${l}${n === 30 ? ' (fastest)' : ''}</option>`).join('')}</select></label>
       <label class="f"><span>Skip listings containing (comma separated)</span><input class="t" name="excludeWords" value="${v('excludeWords')}" placeholder="broken, parts, box only, read"></label>
       <div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">Marketplaces</span><div class="srcs">${srcs}</div></div>
       <div class="two" style="margin-top:14px">
@@ -234,7 +267,9 @@ function openSearchForm(s = null) {
       <button class="btn primary" style="width:100%">${s ? 'Save' : 'Start watching'}</button>
       ${s ? `<div style="display:flex;gap:8px;margin-top:10px">
         <button type="button" class="btn" style="flex:1" id="runNow">Check now</button>
-        <button type="button" class="btn" style="flex:1" id="showHistory">Price history</button>
+        <button type="button" class="btn" style="flex:1" id="showHistory">Price history</button></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+        <button type="button" class="btn" style="flex:1" id="dupSearch">Duplicate</button>
         <button type="button" class="btn danger" style="flex:1" id="delSearch">Delete</button></div>
         <div id="history"></div>` : ''}
     </form>`);
@@ -253,6 +288,7 @@ function openSearchForm(s = null) {
     } catch (err) { $('#formErr').textContent = err.message; }
   });
   if (!s) return;
+  $('#dupSearch').addEventListener('click', () => openSearchForm(s, { copy: true }));
   $('#delSearch').addEventListener('click', async () => {
     if (!confirm(`Delete "${s.name}" and its deals?`)) return;
     await api(`/api/searches/${s.id}`, { method: 'DELETE' });
@@ -388,15 +424,163 @@ async function loadSettings() {
   $('#quietStart').value = settings.quietStart || '';
   $('#quietEnd').value = settings.quietEnd || '';
   $('#feePct').value = settings.feePct || '';
+  renderChannels(settings);
+  const took = (ms) => (ms == null ? '' : ` · took ${ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's'}`);
   $('#status').innerHTML = status.sources.map((s) => {
     const cls = s.ok === true ? 'ok' : s.ok === false ? 'bad' : '';
     const sub = s.ok === undefined ? 'Not checked yet'
-      : s.ok ? `Working · ${s.count} listings · ${ago(s.at)}`
+      : s.ok ? `Working · ${s.count} listings · checked ${ago(s.at)}${took(s.ms)}`
       : `Failing: ${s.error} · ${ago(s.at)}`;
     const extra = s.id === 'ebay' ? (status.ebayApi ? ' · official API' : ' · no API keys, reading the website') : '';
     return `<div class="row"><span class="dot ${cls}"></span><div class="grow"><div class="sname">${esc(s.label)}</div><div class="sub" style="white-space:normal">${esc(sub + extra)}</div></div></div>`;
-  }).join('') + `<div class="row"><div class="grow sub" style="white-space:normal">Checks every ${Math.round(status.pollIntervalSec)} seconds · ${status.subscriptions} device(s) getting alerts</div></div>`;
+  }).join('') + `<div class="row"><div class="grow sub" style="white-space:normal">Each search checks on its own timer (set it when editing a search) · ${status.subscriptions} iPhone(s) getting alerts</div></div>`;
 }
+
+
+/* ---------- flips ---------- */
+let flips = [];
+
+async function loadFlips() {
+  const r = await api('/api/flips');
+  flips = r.flips;
+  const s = r.summary;
+  const signed = (n) => (n >= 0 ? '' : '−') + money(Math.abs(n));
+  $('#flipStats').innerHTML = `
+    <div class="stat"><div class="k">Profit this month</div><div class="v ${s.monthProfit >= 0 ? 'up' : 'down'}">${signed(s.monthProfit)}</div></div>
+    <div class="stat"><div class="k">Total profit</div><div class="v ${s.totalProfit >= 0 ? 'up' : 'down'}">${signed(s.totalProfit)}</div></div>
+    <div class="stat"><div class="k">In stock</div><div class="v">${s.stockCount}</div><div class="k">${money(s.stockValue)} tied up</div></div>
+    <div class="stat"><div class="k">Return on sold</div><div class="v">${s.roiPct == null ? '—' : s.roiPct + '%'}</div><div class="k">${s.soldCount} sold</div></div>`;
+  const el = $('#flips');
+  if (!flips.length) {
+    el.innerHTML = '<div class="empty"><b>No flips yet</b>Tap <b>Bought</b> on a deal, or + to add one, and track what you make.</div>';
+    return;
+  }
+  el.innerHTML = flips.map((f) => {
+    const profit = f.soldPrice != null ? f.soldPrice - f.boughtPrice - f.fees : null;
+    const right = profit != null
+      ? `<div class="p" style="color:${profit >= 0 ? 'var(--good)' : 'var(--bad)'}">${profit >= 0 ? '+' : '−'}${money(Math.abs(Math.round(profit * 100) / 100))}</div><div class="sub">sold ${money(f.soldPrice)}</div>`
+      : `<button class="btn sm primary" data-act="sell">Sold</button>`;
+    return `<div class="row flip" data-id="${f.id}">
+      <div class="grow" data-act="edit" style="cursor:pointer">
+        <div class="sname" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.title)}</div>
+        <div class="sub">${f.source ? esc(srcLabel(f.source)) + ' · ' : ''}paid ${money(f.boughtPrice)} · ${esc(ago(f.boughtAt))}</div>
+      </div>
+      <div class="r">${right}</div>
+    </div>`;
+  }).join('');
+}
+
+async function addFlipManually() {
+  const title = prompt('What did you buy?');
+  if (!title) return;
+  const paid = prompt('What did you pay? (£)');
+  if (paid == null) return;
+  try { await api('/api/flips', { method: 'POST', body: { title, boughtPrice: paid } }); loadFlips(); } catch (err) { toast(err.message); }
+}
+
+$('#flips').addEventListener('click', async (e) => {
+  const row = e.target.closest('.row');
+  if (!row) return;
+  const f = flips.find((x) => x.id === Number(row.dataset.id));
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (act === 'sell') {
+    const sold = prompt(`Sold "${f.title}" for? (£)`);
+    if (sold == null || sold === '') return;
+    const fees = prompt('Any fees or postage you paid? (£)', '0');
+    try { await api(`/api/flips/${f.id}`, { method: 'PUT', body: { soldPrice: sold, fees: fees || 0 } }); toast('Nice flip!'); loadFlips(); } catch (err) { toast(err.message); }
+  }
+  if (act === 'edit') openFlipSheet(f);
+});
+
+function openFlipSheet(f) {
+  openSheet(`
+    <h2>Edit flip <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
+    <form id="flipForm">
+      <label class="f"><span>Item</span><input class="t" name="title" value="${esc(f.title)}" required></label>
+      <div class="two">
+        <label class="f"><span>Paid (£)</span><input class="t" name="boughtPrice" inputmode="decimal" value="${esc(f.boughtPrice)}"></label>
+        <label class="f"><span>Sold for (£)</span><input class="t" name="soldPrice" inputmode="decimal" value="${esc(f.soldPrice ?? '')}" placeholder="Not sold yet"></label>
+      </div>
+      <label class="f"><span>Fees and postage (£)</span><input class="t" name="fees" inputmode="decimal" value="${esc(f.fees)}"></label>
+      <label class="f"><span>Notes</span><textarea class="t" name="notes" rows="2">${esc(f.notes)}</textarea></label>
+      ${f.url && safeUrl(f.url) !== '#' ? `<p><a class="linkish" href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener">Open original listing</a></p>` : ''}
+      <div class="err" id="flipErr"></div>
+      <button class="btn primary" style="width:100%">Save</button>
+      <button type="button" class="btn danger" style="width:100%;margin-top:8px" id="delFlip">Delete</button>
+    </form>`);
+  $('#flipForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target).entries());
+    try { await api(`/api/flips/${f.id}`, { method: 'PUT', body }); closeSheet(); loadFlips(); } catch (err) { $('#flipErr').textContent = err.message; }
+  });
+  $('#delFlip').addEventListener('click', async () => {
+    if (!confirm(`Delete "${f.title}"?`)) return;
+    await api(`/api/flips/${f.id}`, { method: 'DELETE' });
+    closeSheet();
+    loadFlips();
+  });
+}
+
+/* ---------- Telegram & Discord ---------- */
+function renderChannels(st) {
+  $('#tgState').textContent = st.telegramConnected ? 'Connected' : st.telegramHasToken ? 'Bot added. Send /start to it in Telegram, then tap Set up → Link.' : 'Not connected';
+  $('#tgSetup').textContent = st.telegramConnected ? 'Change' : 'Set up';
+  $('#dcState').textContent = st.discordConnected ? 'Connected' : 'Not connected';
+  $('#dcSetup').textContent = st.discordConnected ? 'Change' : 'Set up';
+}
+
+$('#tgSetup').addEventListener('click', () => {
+  openSheet(`
+    <h2>Telegram alerts <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
+    <ol style="padding-left:20px;line-height:1.6;margin-top:0">
+      <li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b> and follow the steps.</li>
+      <li>Paste the token it gives you below and tap <b>Save</b>.</li>
+      <li>Open your new bot in Telegram and send it <b>/start</b>.</li>
+      <li>Come back and tap <b>Link</b>.</li>
+    </ol>
+    <label class="f"><span>Bot token</span><input class="t" id="tgToken" placeholder="123456789:AA..." autocomplete="off"></label>
+    <div class="err" id="tgErr"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" style="flex:1" id="tgSave">Save</button>
+      <button class="btn" style="flex:1" id="tgLink">Link</button>
+      <button class="btn danger" style="flex:1" id="tgRemove">Remove</button>
+    </div>`);
+  const fail = (err) => { $('#tgErr').textContent = err.message; };
+  $('#tgSave').addEventListener('click', async () => {
+    try { renderChannels(await api('/api/settings', { method: 'PUT', body: { telegramBotToken: $('#tgToken').value } })); toast('Saved. Now send /start to your bot, then tap Link.'); } catch (err) { fail(err); }
+  });
+  $('#tgLink').addEventListener('click', async () => {
+    try {
+      await api('/api/telegram/link', { method: 'POST' });
+      renderChannels(await api('/api/settings'));
+      await api('/api/test-push', { method: 'POST' });
+      closeSheet();
+      toast('Telegram linked. Check for a test message.');
+    } catch (err) { fail(err); }
+  });
+  $('#tgRemove').addEventListener('click', async () => { renderChannels(await api('/api/settings', { method: 'PUT', body: { telegramBotToken: '' } })); closeSheet(); });
+});
+
+$('#dcSetup').addEventListener('click', () => {
+  openSheet(`
+    <h2>Discord alerts <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
+    <p style="margin-top:0">In your Discord server: <b>Channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL</b>, then paste it here.</p>
+    <label class="f"><span>Webhook URL</span><input class="t" id="dcUrl" placeholder="https://discord.com/api/webhooks/..." autocomplete="off"></label>
+    <div class="err" id="dcErr"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" style="flex:1" id="dcSave">Save &amp; test</button>
+      <button class="btn danger" style="flex:1" id="dcRemove">Remove</button>
+    </div>`);
+  $('#dcSave').addEventListener('click', async () => {
+    try {
+      renderChannels(await api('/api/settings', { method: 'PUT', body: { discordWebhook: $('#dcUrl').value } }));
+      await api('/api/test-push', { method: 'POST' });
+      closeSheet();
+      toast('Discord connected. Check the channel for a test message.');
+    } catch (err) { $('#dcErr').textContent = err.message; }
+  });
+  $('#dcRemove').addEventListener('click', async () => { renderChannels(await api('/api/settings', { method: 'PUT', body: { discordWebhook: '' } })); closeSheet(); });
+});
 
 /* ---------- boot ---------- */
 async function start() {

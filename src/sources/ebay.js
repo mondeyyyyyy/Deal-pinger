@@ -3,6 +3,14 @@ import { stripTags } from '../net.js';
 
 export const id = 'ebay';
 export const label = 'eBay';
+export const lane = 'fetch';
+
+// The Browse API allows ~5,000 calls a day. Spread a 4,500-call budget across every search using eBay.
+const DAILY_BUDGET = 4500;
+export function minIntervalSec({ searchCount = 1, config = {} } = {}) {
+  const usingApi = config.ebayAppId && config.ebayCertId;
+  return Math.max(45, usingApi ? Math.ceil((86400 * searchCount) / DAILY_BUDGET) : 0);
+}
 
 /** Parse an eBay Browse API item_summary/search response. */
 export function parse(json) {

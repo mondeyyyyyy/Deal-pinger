@@ -3,6 +3,8 @@ import { withPage } from '../browser.js';
 
 export const id = 'vinted';
 export const label = 'Vinted';
+export const lane = 'fetch';
+export const minIntervalSec = 20;
 
 const BASE = 'https://www.vinted.co.uk';
 
@@ -19,7 +21,8 @@ export function parse(json) {
       url: url.startsWith('http') ? url : BASE + url,
       image: it.photo?.url || null,
       location: null,
-      postedAt: null,
+      // The first photo's upload time is effectively when the item was listed.
+      postedAt: it.photo?.high_resolution?.timestamp ? new Date(it.photo.high_resolution.timestamp * 1000).toISOString() : null,
     };
   });
 }
@@ -64,7 +67,7 @@ async function viaBrowser(s, ctx) {
       return r.json();
     }, buildApiUrl(s));
     return parse(json);
-  });
+  }, { key: id });
 }
 
 export async function search(s, ctx) {

@@ -36,10 +36,37 @@ function cleanSearch(body, { partial }) {
   if (body.zip !== undefined) out.zip = String(body.zip).trim().toUpperCase(); // UK postcode
   for (const k of ['excludeWords', 'messageTemplate']) if (body[k] !== undefined) out[k] = String(body[k]).trim();
   if (body.enabled !== undefined) out.enabled = !!body.enabled;
+  if (body.intervalSec !== undefined) {
+    const v = num(body.intervalSec);
+    if (v == null || Number.isNaN(v) || v < 30 || v > 3600) return err('Check every must be between 30 seconds and 1 hour');
+    out.intervalSec = Math.round(v);
+  }
   return [out, null];
 }
 
-export function createApp({ db, config, runNow, notify, health }) {
+const DISCORD_HOOK = /^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
+const TG_TOKEN = /^\d+:[\w-]{2,}$/;
+
+/** Settings as the app sees them: channel secrets are never sent back, only whether they're set. */
+function publicSettings(s) {
+  return {
+    quietStart: s.quietStart,
+    quietEnd: s.quietEnd,
+    feePct: s.feePct,
+    discordConnected: !!s.discordWebhook,
+    telegramHasToken: !!s.telegramBotToken,
+    telegramConnected: !!(s.telegramBotToken && s.telegramChatId),
+  };
+}
+
+const CSV_HEAD = ['Title', 'Marketplace', 'Bought £', 'Bought on', 'Sold £', 'Sold on', 'Fees £', 'Profit £', 'Notes', 'Link'];
+function csvCell(v) {
+  let s = v == null ? '' : String(v);
+  if (/^[=+\-@]/.test(s)) s = "'" + s; // stop spreadsheets treating it as a formula
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function createApp({ db, config, runNow, notify, health, linkTelegram }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
@@ -127,7 +154,7 @@ export function createApp({ db, config, runNow, notify, health }) {
     res.json({ ok: true });
   });
 
-  app.get('/api/settings', (_req, res) => res.json(db.getSettings()));
+  app.get('/api/settings', (_req, res) => res.json(publicSettings(db.getSettings())));
   app.put('/api/settings', (req, res) => {
     const patch = {};
     for (const k of ['quietStart', 'quietEnd']) {
@@ -141,7 +168,72 @@ export function createApp({ db, config, runNow, notify, health }) {
       if (f == null || Number.isNaN(f) || f < 0 || f > 50) return res.status(400).json({ error: 'Selling fee must be between 0 and 50%' });
       patch.feePct = f;
     }
-    res.json(db.setSettings(patch));
+    if (req.body?.discordWebhook !== undefined) {
+      const v = String(req.body.discordWebhook || '').trim();
+      if (v && !DISCORD_HOOK.test(v)) return res.status(400).json({ error: 'That isn\'t a Discord webhook link' });
+      patch.discordWebhook = v;
+    }
+    if (req.body?.telegramBotToken !== undefined) {
+      const v = String(req.body.telegramBotToken || '').trim();
+      if (v && !TG_TOKEN.test(v)) return res.status(400).json({ error: 'That isn\'t a Telegram bot token' });
+      patch.telegramBotToken = v;
+      patch.telegramChatId = ''; // a new (or removed) bot needs linking again
+    }
+    res.json(publicSettings(db.setSettings(patch)));
+  });
+
+  app.post('/api/telegram/link', async (_req, res) => {
+    try {
+      res.json({ chatId: await linkTelegram(db) });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get('/api/flips', (_req, res) => res.json({ flips: db.listFlips(), summary: db.flipSummary() }));
+
+  app.post('/api/flips', (req, res) => {
+    const b = req.body || {};
+    const hit = b.hitId != null ? db.recentHits(1000, { includeDismissed: true }).find(h => h.id === Number(b.hitId)) : null;
+    const title = String(b.title ?? hit?.listing.title ?? '').trim();
+    const bought = num(b.boughtPrice ?? hit?.listing.price);
+    if (!title) return res.status(400).json({ error: 'Give it a name' });
+    if (bought == null || Number.isNaN(bought) || bought < 0) return res.status(400).json({ error: 'Enter what you paid' });
+    const flip = db.addFlip({
+      hitId: hit?.id ?? null, title, boughtPrice: bought,
+      source: b.source ?? hit?.listing.source ?? null, url: b.url ?? hit?.listing.url ?? null, image: hit?.listing.image ?? null,
+    });
+    if (hit) db.setHitStatus(hit.id, 'saved');
+    res.status(201).json(flip);
+  });
+
+  app.put('/api/flips/:id', (req, res) => {
+    const id = Number(req.params.id);
+    if (!db.getFlip(id)) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    const patch = {};
+    for (const k of ['boughtPrice', 'soldPrice', 'fees']) {
+      if (b[k] === undefined) continue;
+      const v = num(b[k]);
+      if (Number.isNaN(v) || (v != null && v < 0)) return res.status(400).json({ error: `${k} must be a positive number` });
+      if (k === 'boughtPrice' && v == null) return res.status(400).json({ error: 'Enter what you paid' });
+      patch[k] = k === 'fees' ? (v ?? 0) : v;
+    }
+    for (const k of ['title', 'notes']) if (b[k] !== undefined) patch[k] = String(b[k]).trim();
+    res.json(db.updateFlip(id, patch));
+  });
+
+  app.delete('/api/flips/:id', (req, res) => { db.deleteFlip(Number(req.params.id)); res.status(204).end(); });
+
+  app.get('/api/flips.csv', (_req, res) => {
+    const label = (id) => SOURCES[id]?.label || id || '';
+    const rows = db.listFlips().map(f => [
+      f.title, label(f.source), f.boughtPrice, f.boughtAt?.slice(0, 10), f.soldPrice, f.soldAt?.slice(0, 10), f.fees,
+      f.soldPrice != null ? Math.round((f.soldPrice - f.boughtPrice - f.fees) * 100) / 100 : '', f.notes, f.url,
+    ]);
+    res.set('content-type', 'text/csv; charset=utf-8');
+    res.set('content-disposition', 'attachment; filename="deal-pinger-flips.csv"');
+    res.send([CSV_HEAD, ...rows].map(r => r.map(csvCell).join(',')).join('\n') + '\n');
   });
 
   app.get('/api/vapid', (_req, res) => res.json({ publicKey: config.vapidPublicKey || null }));

@@ -3,6 +3,8 @@ import { scrapeCards } from '../browser.js';
 
 export const id = 'depop';
 export const label = 'Depop';
+export const lane = 'browser';
+export const minIntervalSec = 45;
 
 /** "vintageking-nike-air-max-90-trainers-uk9-5f2a" -> "Nike Air Max 90 Trainers Uk9" (drops seller name and short hash). */
 export function titleFromSlug(slug) {
@@ -30,5 +32,5 @@ export function buildUrl(search) {
 }
 
 export async function search(s, ctx) {
-  return parse(await scrapeCards(ctx.config, buildUrl(s), 'a[href*="/products/"]'));
+  return parse(await scrapeCards(ctx.config, buildUrl(s), 'a[href*="/products/"]', { key: id }));
 }

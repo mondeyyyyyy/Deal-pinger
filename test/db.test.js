@@ -58,7 +58,7 @@ test('price history and settings', () => {
   const hist = db.priceHistory(s.id);
   assert.equal(hist.length, 1);
   assert.equal(hist[0].price, 100);
-  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0 });
+  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0, discordWebhook: null, telegramBotToken: null, telegramChatId: null });
   db.setSettings({ quietStart: '23:00', quietEnd: '07:00' });
   assert.equal(db.getSettings().quietStart, '23:00');
 });
@@ -110,4 +110,42 @@ test('prune keeps the push keys in the cache', () => {
   db.prune();
   assert.deepEqual(db.cacheGet('vapid', Infinity), { publicKey: 'p' });
   assert.equal(db.cacheGet('sold:switch', Infinity), undefined);
+});
+
+test('searches have a check interval (default 60s)', () => {
+  const db = openDb(':memory:');
+  const s = db.addSearch({ name: 'x', keywords: 'x', sources: ['ebay'] });
+  assert.equal(s.intervalSec, 60);
+  assert.equal(db.updateSearch(s.id, { intervalSec: 30 }).intervalSec, 30);
+});
+
+test('flips: buy, sell, summary', () => {
+  const db = openDb(':memory:');
+  const a = db.addFlip({ title: 'Switch', boughtPrice: 100, source: 'vinted', url: 'https://x' });
+  db.addFlip({ title: 'PS5', boughtPrice: 250 });
+  assert.equal(a.soldPrice, null);
+  const sold = db.updateFlip(a.id, { soldPrice: 160, fees: 6 });
+  assert.equal(sold.soldPrice, 160);
+  assert.ok(sold.soldAt);
+  assert.equal(db.listFlips().length, 2);
+  const sum = db.flipSummary();
+  assert.equal(sum.stockCount, 1);
+  assert.equal(sum.stockValue, 250);
+  assert.equal(sum.soldCount, 1);
+  assert.equal(sum.totalProfit, 54);
+  assert.equal(sum.monthProfit, 54);
+  assert.equal(sum.roiPct, 54);
+  db.deleteFlip(a.id);
+  assert.equal(db.listFlips().length, 1);
+});
+
+test('alert channel settings', () => {
+  const db = openDb(':memory:');
+  db.setSettings({ discordWebhook: 'https://discord.com/api/webhooks/1/abc', telegramBotToken: '123:ABC', telegramChatId: '42' });
+  const s = db.getSettings();
+  assert.equal(s.discordWebhook, 'https://discord.com/api/webhooks/1/abc');
+  assert.equal(s.telegramBotToken, '123:ABC');
+  assert.equal(s.telegramChatId, '42');
+  db.setSettings({ discordWebhook: '' });
+  assert.equal(db.getSettings().discordWebhook, null);
 });

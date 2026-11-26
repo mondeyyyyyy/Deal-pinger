@@ -3,6 +3,8 @@ import { scrapeCards } from '../browser.js';
 
 export const id = 'gumtree';
 export const label = 'Gumtree';
+export const lane = 'browser';
+export const minIntervalSec = 45;
 
 // Listing links look like /p/<category>/<slug>/<numeric id>
 const ITEM = /^(?:https:\/\/www\.gumtree\.com)?(\/p\/[^/?#]+\/[^/?#]+\/(\d+))/;
@@ -25,5 +27,5 @@ export function buildUrl(search) {
 }
 
 export async function search(s, ctx) {
-  return parse(await scrapeCards(ctx.config, buildUrl(s), 'a[href*="/p/"]'));
+  return parse(await scrapeCards(ctx.config, buildUrl(s), 'a[href*="/p/"]', { key: id }));
 }

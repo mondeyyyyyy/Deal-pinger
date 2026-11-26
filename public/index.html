@@ -60,6 +60,16 @@ nav.tabs button.on { color: var(--accent); }
 .b-ebay { background: #3665f3; } .b-facebook { background: #1877f2; } .b-vinted { background: #09848e; }
 .b-gumtree { background: #3d7a1f; } .b-depop { background: #e0201a; }
 .drop { font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 6px; color: #fff; background: var(--accent); }
+.hot { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, #ff7a00 18%, transparent); color: #e25a00; }
+.actions .btn.x { flex: 0 0 44px; padding-left: 0; padding-right: 0; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.stat { background: var(--card); border-radius: 16px; padding: 14px; box-shadow: var(--shadow); }
+.stat .v { font-size: 24px; font-weight: 750; letter-spacing: -.01em; }
+.stat .k { font-size: 13px; color: var(--muted); font-weight: 600; }
+.stat .v.up { color: var(--good); } .stat .v.down { color: var(--bad); }
+.flip .r { text-align: right; flex: none; }
+.flip .r .p { font-weight: 700; }
+.linkish { color: var(--accent); font-weight: 600; text-decoration: none; }
 .was { color: var(--muted); text-decoration: line-through; font-size: 15px; font-weight: 500; margin-left: 6px; }
 .profit { font-weight: 700; font-size: 13px; padding: 2px 8px; border-radius: 6px; }
 .profit.up { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
@@ -146,6 +156,12 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
       <div class="card" id="searches"></div>
     </section>
 
+    <section id="tab-flips" class="hidden">
+      <div class="stats" id="flipStats"></div>
+      <div class="card" id="flips"></div>
+      <p style="text-align:center"><a class="linkish" href="/api/flips.csv" download>Export to spreadsheet (CSV)</a></p>
+    </section>
+
     <section id="tab-settings" class="hidden">
       <div class="section-title">Alerts</div>
       <div class="card">
@@ -154,6 +170,14 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
         <div class="row"><div class="grow"><div class="sname">Send a test alert</div><div class="sub">Make sure alerts reach this phone</div></div>
           <button class="btn sm" id="testPush">Send</button></div>
       </div>
+      <div class="section-title">Telegram &amp; Discord</div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="sname">Telegram</div><div class="sub" id="tgState" style="white-space:normal">Not connected</div></div>
+          <button class="btn sm" id="tgSetup">Set up</button></div>
+        <div class="row"><div class="grow"><div class="sname">Discord</div><div class="sub" id="dcState" style="white-space:normal">Not connected</div></div>
+          <button class="btn sm" id="dcSetup">Set up</button></div>
+      </div>
+      <div class="sub" style="white-space:normal;margin:8px 4px 0">Optional extra alerts. Telegram is often the fastest and most reliable way to get pinged.</div>
       <div class="section-title">Quiet hours</div>
       <div class="card" style="padding:14px">
         <div class="two">
@@ -177,6 +201,7 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
   <nav class="tabs">
     <button data-tab="deals" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>Deals</button>
     <button data-tab="searches"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Searches</button>
+    <button data-tab="flips"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg>Flips</button>
     <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>Settings</button>
   </nav>
 </div>
