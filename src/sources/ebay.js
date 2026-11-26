@@ -47,7 +47,18 @@ export function parse(json) {
 }
 
 /** Fallback when no API keys: parse the public search results page (old s-item and new s-card markup). */
-export function parseHtml(html) {
+/**
+ * Website search (used without API keys). LH_BIN=1: Buy It Now only, because an auction's
+ * price is just the current bid. LH_PrefLoc=1: UK only. _sop=10: newest first.
+ */
+export function buildHtmlUrl(s) {
+  const p = new URLSearchParams({ _nkw: s.keywords, _sop: '10', _ipg: '60', LH_PrefLoc: '1', LH_BIN: '1' });
+  if (s.minPrice != null) p.set('_udlo', String(s.minPrice));
+  if (s.maxPrice != null) p.set('_udhi', String(s.maxPrice));
+  return `https://www.ebay.co.uk/sch/i.html?${p}`;
+}
+
+export function parseHtml(html, { bin = false } = {}) {
   const out = [];
   const items = html.split(/<li[^>]+class="[^"]*\bs-(?:item|card)\b/).slice(1);
   for (const it of items) {
@@ -58,7 +69,9 @@ export function parseHtml(html) {
     const priceTxt = stripTags(it.match(/class="[^"]*s-(?:item|card)__price[^"]*"[^>]*>([\s\S]*?)<\/span>/)?.[1] || '');
     const image = it.match(/<img[^>]+src="([^"]+)"/)?.[1] || null;
     if (!title) continue;
-    out.push({ source: id, id: itemId, title, price: /\bto\b/.test(priceTxt) ? null : parsePrice(priceTxt), url: `https://www.ebay.co.uk/itm/${itemId}`, image, location: null, postedAt: null });
+    const listing = { source: id, id: itemId, title, price: /\bto\b/.test(priceTxt) ? null : parsePrice(priceTxt), url: `https://www.ebay.co.uk/itm/${itemId}`, image, location: null, postedAt: null };
+    if (bin) listing.buyUrl = `https://pay.ebay.co.uk/rxo?action=create&rypsvc=true&pagename=ryp&item=${itemId}&TransactionId=-1`;
+    out.push(listing);
   }
   return out;
 }
@@ -96,11 +109,7 @@ export async function search(s, ctx) {
     if (!res.ok) throw new Error(`eBay API HTTP ${res.status}`);
     return parse(await res.json());
   }
-  // LH_PrefLoc=1: UK-only listings. _sop=10: newest first.
-  const p = new URLSearchParams({ _nkw: s.keywords, _sop: '10', _ipg: '60', LH_PrefLoc: '1' });
-  if (s.minPrice != null) p.set('_udlo', String(s.minPrice));
-  if (s.maxPrice != null) p.set('_udhi', String(s.maxPrice));
-  const res = await ctx.fetch(`https://www.ebay.co.uk/sch/i.html?${p}`);
+  const res = await ctx.fetch(buildHtmlUrl(s));
   if (!res.ok) throw new Error(`eBay HTTP ${res.status}`);
-  return parseHtml(await res.text());
+  return parseHtml(await res.text(), { bin: true });
 }

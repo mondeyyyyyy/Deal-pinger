@@ -100,6 +100,7 @@ test('slow sold-price lookups do not hold back the alert', async () => {
   d.notify = async (_s, h) => { sent.push(h); };
   d.getSoldPrices = () => new Promise(r => setTimeout(() => r([100]), 10000));
   d.compsWaitMs = 50;
+  d.db.setSettings({ scamFilter: 'off' }); // pure speed path: with 'hide', a cold price cache is waited for (safety)
   const s = d.db.addSearch({ name: 's', keywords: 'switch', sources: ['a'] });
   await runSourceOnce(s, 'a', d);
   listings = [...listings, { ...listings[0], id: '2' }];
@@ -112,13 +113,13 @@ test('slow sold-price lookups do not hold back the alert', async () => {
 
 test('bursts go through notify.batch when available', async () => {
   const d = deps({ a: { search: async () => listings } });
-  let listings = [];
+  let listings = [{ source: 'a', id: 'seed', title: 'x', price: 1, url: 'https://x', image: null, location: null, postedAt: null }];
   const batches = [];
   d.notify = async () => {};
   d.notify.batch = async (_s, hits) => { batches.push(hits.length); };
   const s = d.db.addSearch({ name: 's', keywords: 'x', sources: ['a'] });
   await runSourceOnce(s, 'a', d);
-  listings = Array.from({ length: 5 }, (_, i) => ({ source: 'a', id: String(i), title: 'x', price: 1, url: 'https://x', image: null, location: null, postedAt: null }));
+  listings = [...listings, ...Array.from({ length: 5 }, (_, i) => ({ source: 'a', id: String(i), title: 'x', price: 1, url: 'https://x', image: null, location: null, postedAt: null }))];
   await runSourceOnce(s, 'a', d);
   assert.deepEqual(batches, [5]);
 });

@@ -4,6 +4,7 @@ import { assessScam } from './scam.js';
 
 const SOURCE_TIMEOUT_MS = 120000;
 const COMPS_WAIT_MS = 2500; // never hold an alert longer than this for sold-price / CeX lookups
+const EXTRA_WAIT_MS = 8000; // extra wait when a price decides whether a deal is hidden or sent
 const SELLER_WAIT_MS = 3000; // seller-rating lookups (only for suspiciously cheap listings)
 const SELLER_CACHE_MS = 3600 * 1000;
 const sellerCache = new Map(); // "source:sellerId" -> { at, info }
@@ -43,18 +44,20 @@ export async function runSourceOnce(search, sourceId, deps) {
   try {
     // Each "a | b" variant is its own marketplace query; merge the results.
     const variants = keywordVariants(search.keywords);
+    let cancelled = false; // set on timeout so we stop opening pages after the lane slot is released
     const fetchAll = async () => {
       if (variants.length <= 1) return src.search(search, ctx);
       const seenIds = new Set();
       const merged = [];
       for (const v of variants) {
+        if (cancelled) break;
         for (const l of await src.search({ ...search, keywords: v }, ctx)) {
           if (!seenIds.has(String(l.id))) { seenIds.add(String(l.id)); merged.push(l); }
         }
       }
       return merged;
     };
-    listings = await withTimeout(fetchAll(), SOURCE_TIMEOUT_MS, sourceId);
+    listings = await withTimeout(fetchAll(), SOURCE_TIMEOUT_MS, sourceId).catch((e) => { cancelled = true; throw e; });
     health?.record(sourceId, { ok: true, count: listings.length, error: null, ms: Date.now() - started });
   } catch (e) {
     health?.record(sourceId, { ok: false, error: e.message, ms: Date.now() - started });
@@ -71,21 +74,29 @@ export async function runSourceOnce(search, sourceId, deps) {
   const drops = db.priceDrops(search.id, matching, PRICE_DROP_FRACTION);
   const fresh = db.markSeen(search.id, matching);
   if (firstRun) {
-    db.markSeeded(search.id, sourceId);
+    db.markSeeded(search.id, sourceId, { empty: listings.length === 0 });
     return { newHits: [], error: null };
+  }
+  // Seeded from an empty page: a sudden full page usually means the site was blocking us before,
+  // so seed silently. A few new listings on a quiet search are genuinely new, so alert those.
+  if (db.seededEmpty(search.id, sourceId)) {
+    db.markSeeded(search.id, sourceId, { empty: listings.length === 0 });
+    if (fresh.length > 3) return { newHits: [], error: null };
   }
   const alerts = [...fresh, ...drops.map(d => ({ ...d.listing, previousPrice: d.previousPrice }))];
   if (!alerts.length) return { newHits: [], error: null };
 
   // Sold prices (12h cache) and CeX prices (24h cache) are looked up together. If either is slow,
   // alert without it rather than wait; the lookup finishes in the background and is cached.
-  const wait = deps.compsWaitMs ?? COMPS_WAIT_MS;
-  const capped = (p) => withTimeout(p.catch(() => null), wait, 'lookup').catch(() => null);
-  const [prices, cex] = await Promise.all([
-    search.resaleOverride == null ? capped(getSoldPrices(search.keywords)) : Promise.resolve([]),
-    deps.getCex ? capped(deps.getCex(search)) : Promise.resolve(null),
-  ]);
   const { feePct, scamFilter } = db.getSettings();
+  const wait = deps.compsWaitMs ?? COMPS_WAIT_MS;
+  const capped = (p, ms = wait) => withTimeout(p, ms, 'lookup').catch(() => null);
+  const soldP = search.resaleOverride == null ? getSoldPrices(search.keywords).catch(() => null) : Promise.resolve([]);
+  const cexP = deps.getCex ? deps.getCex(search).catch(() => null) : Promise.resolve(null);
+  let [prices, cex] = await Promise.all([capped(soldP), capped(cexP)]);
+  // When the price decides whether a deal is hidden (scam filter) or sent (profit minimum),
+  // a slow lookup is worth waiting a little longer for. Usually it's pre-loaded and instant.
+  if (prices === null && (scamFilter === 'hide' || search.minProfit != null)) prices = await capped(soldP, EXTRA_WAIT_MS);
   const newHits = [];
   const toAlert = [];
   const ests = alerts.map((listing) => buildEstimate(search, listing, { prices, cex, feePct }));
@@ -112,7 +123,8 @@ export async function runSourceOnce(search, sourceId, deps) {
     const hidden = !trusted && scamFilter !== 'off' && scamFilter !== 'flag' && listing.scam.risk === 'high';
     const hit = db.addHit(search.id, listing, est, hidden ? 'flagged' : 'new');
     newHits.push(hit);
-    const worthIt = search.minProfit == null || (est && est.bestProfit >= search.minProfit);
+    // Unknown profit isn't "below the minimum": alert rather than lose the deal for good.
+    const worthIt = search.minProfit == null || !est || est.bestProfit >= search.minProfit;
     if (worthIt && !hidden) toAlert.push(hit);
   }
   if (toAlert.length) {
@@ -177,7 +189,8 @@ export function startPoller(deps, {
   function watchOutage(sourceId, error) {
     const label = sources[sourceId]?.label || sourceId;
     const o = outages.get(sourceId);
-    const send = (payload) => deps.notify?.sendRaw?.({ url: '/', ...payload }).catch?.(() => {});
+    const notifier = deps.notify?.info || deps.notify?.sendRaw;
+    const send = (payload) => notifier?.({ url: '/', ...payload }).catch?.(() => {});
     if (!error) {
       if (o?.alerted) send({ title: `${label} is working again`, body: 'Deal Pinger is checking it normally.' });
       outages.delete(sourceId);

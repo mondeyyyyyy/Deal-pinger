@@ -22,8 +22,9 @@ export function matches(listing, search) {
   const title = String(listing.title || '').toLowerCase();
   const variants = keywordVariants(search.keywords);
   if (!variants.some(v => words(v).every(w => title.includes(w)))) return false;
+  // Skip words match whole words/phrases, so "locked" doesn't hide "unlocked" and "case" doesn't hide "showcase".
   const excluded = String(search.excludeWords || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
-  if (excluded.some(w => title.includes(w))) return false;
+  if (excluded.some(w => new RegExp(`(^|[^a-z0-9])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^a-z0-9])`).test(title))) return false;
   const p = listing.price;
   if (p != null) {
     if (search.minPrice != null && p < search.minPrice) return false;

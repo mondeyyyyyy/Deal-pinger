@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS hits (
   status TEXT NOT NULL DEFAULT 'new',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE IF NOT EXISTS seeded (searchId INTEGER NOT NULL, source TEXT NOT NULL, PRIMARY KEY (searchId, source));
+CREATE TABLE IF NOT EXISTS seeded (searchId INTEGER NOT NULL, source TEXT NOT NULL, empty INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (searchId, source));
 CREATE TABLE IF NOT EXISTS subscriptions (endpoint TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, at INTEGER NOT NULL);
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS flips (
 `;
 
 const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'soldPrice', 'soldAt', 'fees', 'notes'];
-const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter', 'tapOpens', 'sessionVersion', 'digestTime', 'lastDigestDate'];
+const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter', 'tapOpens', 'sessionVersion', 'digestTime', 'lastDigestDate', 'quietMissed'];
 
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
@@ -67,6 +67,7 @@ const MIGRATIONS = [
   ['searches', 'cexName', 'TEXT'],
   ['searches', 'cexMode', "TEXT NOT NULL DEFAULT 'auto'"],
   ['searches', 'discordWebhook', 'TEXT'],
+  ['seeded', 'empty', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 function rowToSearch(r) {
@@ -128,8 +129,13 @@ export function openDb(file) {
     isSeeded(searchId, source) {
       return !!db.prepare('SELECT 1 FROM seeded WHERE searchId = ? AND source = ?').get(searchId, source);
     },
-    markSeeded(searchId, source) {
-      db.prepare('INSERT OR IGNORE INTO seeded (searchId, source) VALUES (?, ?)').run(searchId, source);
+    /** Seeded from an empty result? (A blocked page looks empty, so the next full page is treated with care.) */
+    seededEmpty(searchId, source) {
+      return !!db.prepare('SELECT empty FROM seeded WHERE searchId = ? AND source = ?').get(searchId, source)?.empty;
+    },
+    markSeeded(searchId, source, { empty = false } = {}) {
+      db.prepare('INSERT INTO seeded (searchId, source, empty) VALUES (?, ?, ?) ON CONFLICT(searchId, source) DO UPDATE SET empty = excluded.empty')
+        .run(searchId, source, empty ? 1 : 0);
     },
     /** Record listings; returns the ones never seen before. Listings seen again get lastSeenAt refreshed. */
     markSeen(searchId, listings) {
@@ -199,15 +205,25 @@ export function openDb(file) {
       return db.prepare('SELECT source, price, seenAt FROM seen WHERE searchId = ? AND price IS NOT NULL ORDER BY seenAt').all(searchId);
     },
     addHit(searchId, listing, estimate = null, status = 'new') {
+      // A price drop replaces the earlier card for the same listing (unless that one was saved or bought).
+      if (listing.previousPrice != null) {
+        db.prepare("UPDATE hits SET status = 'dismissed' WHERE searchId = ? AND status IN ('new', 'flagged') AND json_extract(listing, '$.source') = ? AND json_extract(listing, '$.id') = ?")
+          .run(searchId, listing.source, String(listing.id));
+      }
       const r = db.prepare('INSERT INTO hits (searchId, listing, estimate, status) VALUES (?, ?, ?, ?)')
         .run(searchId, JSON.stringify(listing), estimate ? JSON.stringify(estimate) : null, status);
       return { id: Number(r.lastInsertRowid), searchId, listing, estimate, status };
     },
-    recentHits(limit = 100, { includeDismissed = false } = {}) {
-      const where = includeDismissed ? '' : "WHERE h.status != 'dismissed'";
+    recentHits(limit = 100, { includeDismissed = false, status = null } = {}) {
+      const where = status ? 'WHERE h.status = ?' : includeDismissed ? '' : "WHERE h.status != 'dismissed'";
+      const args = status ? [status, limit] : [limit];
       return db.prepare(`SELECT h.*, s.name AS searchName FROM hits h LEFT JOIN searches s ON s.id = h.searchId ${where} ORDER BY h.id DESC LIMIT ?`)
-        .all(limit)
+        .all(...args)
         .map(r => ({ ...r, listing: JSON.parse(r.listing), estimate: r.estimate ? JSON.parse(r.estimate) : null }));
+    },
+    getHit(id) {
+      const r = db.prepare('SELECT * FROM hits WHERE id = ?').get(id);
+      return r ? { ...r, listing: JSON.parse(r.listing), estimate: r.estimate ? JSON.parse(r.estimate) : null } : null;
     },
     setHitStatus(id, status) {
       db.prepare('UPDATE hits SET status = ? WHERE id = ?').run(status, id);
@@ -236,6 +252,7 @@ export function openDb(file) {
         sessionVersion: rows.sessionVersion ?? '1',
         digestTime: rows.digestTime ?? null,
         lastDigestDate: rows.lastDigestDate ?? null,
+        quietMissed: rows.quietMissed ?? '0',
       };
     },
     setSettings(patch) {

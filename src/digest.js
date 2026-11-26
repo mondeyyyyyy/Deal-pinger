@@ -5,8 +5,8 @@ const money = (n) => `£${Number.isInteger(Number(n)) ? Number(n) : Number(n).to
 export function buildDigest(db) {
   const rows = db.raw.prepare("SELECT listing, estimate, status FROM hits WHERE createdAt >= datetime('now', '-1 day')").all()
     .map(r => ({ status: r.status, listing: JSON.parse(r.listing), estimate: r.estimate ? JSON.parse(r.estimate) : null }));
-  const deals = rows.filter(r => r.status !== 'flagged');
-  const scams = rows.length - deals.length;
+  const deals = rows.filter(r => r.status !== 'flagged' && r.status !== 'dismissed');
+  const scams = rows.filter(r => r.status === 'flagged').length;
   const best = deals
     .filter(r => r.estimate?.bestProfit != null)
     .sort((a, b) => b.estimate.bestProfit - a.estimate.bestProfit)[0];
@@ -28,6 +28,6 @@ export async function maybeSendDigest(db, notify, { hhmm, date }) {
   const s = db.getSettings();
   if (!s.digestTime || hhmm < s.digestTime || s.lastDigestDate === date) return false;
   db.setSettings({ lastDigestDate: date });
-  await notify.sendRaw(buildDigest(db));
+  await (notify.info || notify.sendRaw)(buildDigest(db));
   return true;
 }

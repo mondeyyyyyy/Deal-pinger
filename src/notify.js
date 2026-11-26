@@ -136,8 +136,10 @@ export function createNotifier({ db, config, webpush, now, sourceLabel = (s) => 
     return 0;
   }
 
-  async function sendPush(payload) {
+  async function sendPush(full) {
     if (!config.vapidPublicKey) return 0;
+    // Apple rejects push payloads over 4KB: send only what the phone shows.
+    const payload = { title: String(full.title || '').slice(0, 150), body: String(full.body || '').slice(0, 300), url: full.url, tag: full.tag, hitId: full.hitId };
     const results = await Promise.all(db.listSubscriptions().map(async (sub) => {
       try {
         await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: 'high', timeout: 10000 });
@@ -179,12 +181,28 @@ export function createNotifier({ db, config, webpush, now, sourceLabel = (s) => 
     telegram: telegramDeal(search, hit, sourceLabel),
   });
 
+  // Deals held back by quiet hours are counted, so you hear about them once quiet hours end.
+  function holdForQuiet(n) {
+    db.setSettings({ quietMissed: String(Number(db.getSettings().quietMissed || 0) + n) });
+    return 0;
+  }
+
   async function notify(search, hit, { force = false } = {}) {
-    if (!force && quiet()) return 0;
+    if (!force && quiet()) return holdForQuiet(1);
     return sendAll(dealMsg(search, hit), search);
   }
+  /** Service messages (outage warnings, the daily summary): skipped during quiet hours. */
+  notify.info = (payload) => (quiet() ? Promise.resolve(0) : sendAll({ push: payload }));
+  /** Call regularly: once quiet hours are over, say how many deals arrived during them. */
+  notify.afterQuiet = async () => {
+    const missed = Number(db.getSettings().quietMissed || 0);
+    if (!missed || quiet()) return 0;
+    db.setSettings({ quietMissed: '0' });
+    return sendAll({ push: { title: `${missed} deal${missed === 1 ? '' : 's'} came in during quiet hours`, body: 'Open Deal Pinger to see them.', url: '/', tag: 'quiet-summary' } });
+  };
   notify.batch = async (search, hits) => {
-    if (!hits.length || quiet()) return 0;
+    if (!hits.length) return 0;
+    if (quiet()) return holdForQuiet(hits.length);
     if (hits.length > SUMMARY_OVER) {
       const p = formatSummary(search, hits, sourceLabel);
       return sendAll({ push: p, discordEmbed: discordSummary(p), telegram: telegramSummary(p) }, search);

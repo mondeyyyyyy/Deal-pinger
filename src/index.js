@@ -42,6 +42,7 @@ const app = createApp({ db, config, runNow: poller.runNow, notify, health, linkT
 const ukDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: config.timezone }).format(new Date());
 const digestTimer = setInterval(() => {
   maybeSendDigest(db, notify, { hhmm: nowHHMM(config.timezone), date: ukDate() }).catch((e) => console.warn('digest failed:', e.message));
+  notify.afterQuiet().catch(() => {});
 }, 60000);
 
 const server = app.listen(config.port, () => console.log(`Deal Pinger listening on :${config.port}`));

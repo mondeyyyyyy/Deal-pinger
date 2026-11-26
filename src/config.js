@@ -16,7 +16,7 @@ export function loadConfig(env = process.env) {
     facebookLocation: env.FACEBOOK_LOCATION || 'london',
     proxyUrl: env.PROXY_URL || '',
     pollIntervalSec: Number(env.POLL_INTERVAL_SEC || 60),
-    browserConcurrency: Number(env.BROWSER_CONCURRENCY || 2),
+    browserConcurrency: Math.max(1, Math.floor(Number(env.BROWSER_CONCURRENCY)) || 2),
     timezone: env.TZ || 'Europe/London',
   };
 }

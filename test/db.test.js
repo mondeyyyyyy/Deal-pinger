@@ -58,7 +58,7 @@ test('price history and settings', () => {
   const hist = db.priceHistory(s.id);
   assert.equal(hist.length, 1);
   assert.equal(hist[0].price, 100);
-  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0, discordWebhook: null, telegramBotToken: null, telegramChatId: null, discordMention: null, scamFilter: 'hide', tapOpens: 'listing', sessionVersion: '1', digestTime: null, lastDigestDate: null });
+  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0, discordWebhook: null, telegramBotToken: null, telegramChatId: null, discordMention: null, scamFilter: 'hide', tapOpens: 'listing', sessionVersion: '1', digestTime: null, lastDigestDate: null, quietMissed: '0' });
   db.setSettings({ quietStart: '23:00', quietEnd: '07:00' });
   assert.equal(db.getSettings().quietStart, '23:00');
 });
