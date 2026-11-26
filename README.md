@@ -91,7 +91,7 @@ To send a particular search to its own channel (say, a #ps5 channel), edit that 
 
 - **Vinted** can be checked every 15 seconds, and **eBay** every 45 seconds. With API keys, eBay automatically slows down when you have lots of eBay searches, to stay inside eBay's free limit of about 5,000 lookups a day: 10 eBay searches means a check about every 3 minutes each.
 - **Facebook, Gumtree and Depop** load a real (headless) browser, so they're checked at most every 45 seconds, and each check takes a few seconds. Images, video and fonts are skipped, and each site keeps a warm browser session, so repeat checks are much quicker.
-- Alerts go out the moment a listing is found. Profit estimates never hold an alert up by more than 2.5 seconds.
+- Alerts go out the moment a listing is found. Prices are pre-loaded, so profit figures are normally instant. The one exception: when a search's prices haven't loaded yet and the scam filter (or a profit minimum) needs them, an alert can wait up to about 10 seconds, so a scam can't slip through on an unknown price.
 - eBay sold prices and CeX prices are **pre-loaded** for every search (and again whenever you edit one), so alerts never wait for them.
 - Up to 6 quick lookups (eBay, Vinted) run at the same time.
 - **Settings → Marketplaces** shows when each site was last checked and how long it took.
