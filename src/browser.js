@@ -32,7 +32,8 @@ export async function withPage(config, fn) {
   const browser = await getBrowser(config);
   const context = await browser.newContext({
     userAgent: UA,
-    locale: 'en-US',
+    locale: 'en-GB',
+    timezoneId: 'Europe/London',
     viewport: { width: 430, height: 932 },
     isMobile: true,
   });

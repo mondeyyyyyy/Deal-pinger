@@ -56,7 +56,7 @@ test('create, list, update, delete a search', async () => {
   assert.equal(bad.status, 400);
   const badSrc = await req('/api/searches', { cookie, method: 'POST', body: { name: 'x', keywords: 'ps5', sources: ['myspace'] } });
   assert.equal(badSrc.status, 400);
-  const r = await req('/api/searches', { cookie, method: 'POST', body: { name: 'PS5', keywords: 'ps5', maxPrice: '300', sources: ['ebay', 'craigslist'] } });
+  const r = await req('/api/searches', { cookie, method: 'POST', body: { name: 'PS5', keywords: 'ps5', maxPrice: '300', sources: ['ebay', 'vinted'] } });
   assert.equal(r.status, 201);
   const s = await r.json();
   assert.equal(s.maxPrice, 300);
@@ -91,6 +91,17 @@ test('settings, vapid, subscribe, test push', async () => {
   assert.equal(pushes.length, 1);
 });
 
+test('selling fee and resale override validation', async () => {
+  const cookie = await login();
+  assert.equal((await (await req('/api/settings', { cookie, method: 'PUT', body: { feePct: '12.8' } })).json()).feePct, 12.8);
+  assert.equal((await req('/api/settings', { cookie, method: 'PUT', body: { feePct: 'abc' } })).status, 400);
+  assert.equal((await req('/api/settings', { cookie, method: 'PUT', body: { feePct: 80 } })).status, 400);
+  const s = await (await req('/api/searches', { cookie, method: 'POST', body: { keywords: 'ps5', resaleOverride: '320', zip: 'M1 1AE', sources: ['vinted'] } })).json();
+  assert.equal(s.resaleOverride, 320);
+  assert.equal(s.zip, 'M1 1AE');
+});
+
+// Keep last: it locks this IP out of logging in.
 test('login is rate limited after repeated failures', async () => {
   let last;
   for (let i = 0; i < 12; i++) last = await req('/api/login', { method: 'POST', body: { password: 'bad' + i } });

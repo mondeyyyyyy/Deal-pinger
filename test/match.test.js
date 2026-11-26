@@ -43,7 +43,7 @@ test('quiet hours handle overnight windows', () => {
 });
 
 test('estimate math', () => {
-  const e = estimate({ shipEstimate: 12 }, L('x', 100), [190, 200, 210]);
+  const e = estimate({ shipEstimate: 12 }, L('x', 100), [190, 200, 210], { feePct: 13.25 });
   assert.equal(e.value, 200);
   assert.equal(e.profit, 61.5);
   assert.ok(e.score > 0 && e.score <= 100);
@@ -61,4 +61,22 @@ test('median', () => {
 test('parseSold pulls sold prices from eBay results page', () => {
   const html = fs.readFileSync(new URL('./fixtures/ebay-sold.html', import.meta.url), 'utf8');
   assert.deepEqual(parseSold(html), [180, 210.5]);
+});
+
+test('parsePrice handles pounds', () => {
+  assert.equal(parsePrice('£1,250.00'), 1250);
+  assert.equal(parsePrice('£45'), 45);
+});
+
+test('UK estimate: fee is a setting (default 0%) and a resale override wins over comps', () => {
+  const e0 = estimate({ shipEstimate: 4 }, L('x', 100), [200]);
+  assert.equal(e0.profit, 96);
+  const e1 = estimate({ shipEstimate: 4 }, L('x', 100), [200], { feePct: 12.8 });
+  assert.equal(e1.profit, 70.4);
+  const e2 = estimate({ shipEstimate: 4, resaleOverride: 150 }, L('x', 100), [200]);
+  assert.equal(e2.value, 150);
+  assert.equal(e2.profit, 46);
+  assert.equal(e2.comps, 0);
+  const e3 = estimate({ shipEstimate: 4, resaleOverride: 150 }, L('x', 100), null);
+  assert.equal(e3.value, 150);
 });

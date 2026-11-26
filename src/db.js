@@ -11,8 +11,9 @@ CREATE TABLE IF NOT EXISTS searches (
   sources TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
   minProfit REAL,
-  shipEstimate REAL NOT NULL DEFAULT 12,
-  messageTemplate TEXT NOT NULL DEFAULT 'Hi! Is this still available? I can pick up today for {offer}.',
+  shipEstimate REAL NOT NULL DEFAULT 4,
+  resaleOverride REAL,
+  messageTemplate TEXT NOT NULL DEFAULT 'Hi! Is this still available? I can collect today for {offer}.',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS seen (
@@ -36,7 +37,11 @@ CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, at 
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
-const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'messageTemplate'];
+const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'messageTemplate'];
+const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride'];
+
+// Columns added after the first release; added to older databases on startup.
+const MIGRATIONS = [['searches', 'resaleOverride', 'REAL']];
 
 function rowToSearch(r) {
   if (!r) return null;
@@ -46,7 +51,7 @@ function rowToSearch(r) {
 function toCol(k, v) {
   if (k === 'sources') return JSON.stringify(v || []);
   if (k === 'enabled') return v ? 1 : 0;
-  if (v === undefined || v === '') return ['minPrice', 'maxPrice', 'minProfit'].includes(k) ? null : v;
+  if (v === undefined || v === '') return NULLABLE.includes(k) ? null : v;
   return v;
 }
 
@@ -54,6 +59,10 @@ export function openDb(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  for (const [table, col, type] of MIGRATIONS) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+    if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  }
 
   const getSearch = (id) => rowToSearch(db.prepare('SELECT * FROM searches WHERE id = ?').get(id));
 
@@ -105,6 +114,30 @@ export function openDb(file) {
       }
       return fresh;
     },
+    /**
+     * For listings already seen, return those whose price fell by at least minFraction,
+     * and remember the new lower price so the same drop doesn't alert twice.
+     */
+    priceDrops(searchId, listings, minFraction = 0.05) {
+      const get = db.prepare('SELECT price FROM seen WHERE searchId = ? AND source = ? AND listingId = ?');
+      const upd = db.prepare('UPDATE seen SET price = ? WHERE searchId = ? AND source = ? AND listingId = ?');
+      const drops = [];
+      for (const l of listings) {
+        if (l.price == null) continue;
+        const row = get.get(searchId, l.source, String(l.id));
+        if (!row || row.price == null || l.price >= row.price) continue;
+        upd.run(l.price, searchId, l.source, String(l.id));
+        if (row.price - l.price >= row.price * minFraction) drops.push({ listing: l, previousPrice: row.price });
+      }
+      return drops;
+    },
+    /** Forget listings seen long ago and old hits the user didn't save, so the database stays small. */
+    prune({ seenDays = 45, hitDays = 60 } = {}) {
+      db.prepare("DELETE FROM seen WHERE seenAt < datetime('now', ?)").run(`-${seenDays} days`);
+      db.prepare("DELETE FROM hits WHERE status != 'saved' AND createdAt < datetime('now', ?)").run(`-${hitDays} days`);
+      // Only expire sold-price lookups; other cache rows (e.g. the push keys) must survive.
+      db.prepare("DELETE FROM cache WHERE key LIKE 'sold:%' AND at < ?").run(Date.now() - 7 * 24 * 3600 * 1000);
+    },
     priceHistory(searchId) {
       return db.prepare('SELECT source, price, seenAt FROM seen WHERE searchId = ? AND price IS NOT NULL ORDER BY seenAt').all(searchId);
     },
@@ -133,11 +166,12 @@ export function openDb(file) {
     },
     getSettings() {
       const rows = Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(r => [r.key, r.value]));
-      return { quietStart: rows.quietStart ?? null, quietEnd: rows.quietEnd ?? null };
+      return { quietStart: rows.quietStart ?? null, quietEnd: rows.quietEnd ?? null, feePct: Number(rows.feePct ?? 0) };
     },
     setSettings(patch) {
       const st = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
       for (const k of ['quietStart', 'quietEnd']) if (k in patch) st.run(k, patch[k] || null);
+      if ('feePct' in patch) st.run('feePct', String(Number(patch.feePct) || 0));
       return this.getSettings();
     },
     cacheGet(key, maxAgeMs) {

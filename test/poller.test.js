@@ -108,8 +108,8 @@ test('notifier sends to all subs and drops dead (410) ones', async () => {
   const { db, calls, notify } = notifierSetup();
   await notify({ name: 'Switch' }, HIT);
   assert.equal(calls.length, 2);
-  assert.match(calls[0].payload.title, /\$80/);
-  assert.match(calls[0].payload.body, /\+\$61\.5 profit/);
+  assert.match(calls[0].payload.title, /£80/);
+  assert.match(calls[0].payload.body, /\+£61\.5 profit/);
   assert.equal(calls[0].payload.url, 'https://x/9');
   assert.deepEqual(db.listSubscriptions().map(s => s.endpoint), ['good']);
 });
@@ -202,4 +202,23 @@ test('notifier passes a send timeout and drops 403 (key mismatch) subs', async (
   await notify({ name: 'x' }, HIT);
   assert.ok(opts[0].timeout > 0 && opts[0].timeout <= 15000);
   assert.equal(db.listSubscriptions().length, 0);
+});
+
+test('price drop on an already-seen listing alerts with the old price', async () => {
+  const { db, search, feeds, sent, deps } = setup();
+  await runSearchOnce(search, deps);
+  feeds.a = [L('a', '1', 40)];
+  const r = await runSearchOnce(search, deps);
+  assert.equal(r.newHits.length, 1);
+  assert.equal(sent[0].listing.previousPrice, 50);
+  assert.equal(sent[0].listing.price, 40);
+  await runSearchOnce(search, deps);
+  assert.equal(sent.length, 1);
+});
+
+test('push text uses pounds and calls out price drops', async () => {
+  const { formatPush } = await import('../src/notify.js');
+  const p = formatPush({ name: 'Switch' }, { id: 1, listing: { ...L('vinted', '1', 40, 'Switch Lite'), previousPrice: 55 }, estimate: { value: 90, profit: 46, score: 50 } });
+  assert.match(p.title, /^Price drop £55 → £40 · Switch Lite/);
+  assert.match(p.body, /\+£46 profit \(resells ~£90\)/);
 });

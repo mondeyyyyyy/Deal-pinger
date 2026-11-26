@@ -1,7 +1,5 @@
 import { parsePrice } from './match.js';
 
-export const EBAY_FEE = 0.1325;
-
 export function median(nums) {
   const a = nums.filter(n => Number.isFinite(n)).sort((x, y) => x - y);
   if (!a.length) return null;
@@ -11,13 +9,19 @@ export function median(nums) {
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
-export function estimate(search, listing, soldPrices) {
-  const value = median(soldPrices || []);
+/**
+ * Resale value = the search's manual override, else the median eBay UK sold price.
+ * Profit = value minus selling fee (feePct, default 0: eBay UK private sellers and Vinted sellers pay none),
+ * minus shipping, minus the asking price.
+ */
+export function estimate(search, listing, soldPrices, { feePct = 0 } = {}) {
+  const override = search.resaleOverride ?? null;
+  const value = override ?? median(soldPrices || []);
   if (value == null || listing.price == null) return null;
-  const profit = round2(value * (1 - EBAY_FEE) - (search.shipEstimate ?? 12) - listing.price);
+  const profit = round2(value * (1 - feePct / 100) - (search.shipEstimate ?? 4) - listing.price);
   const base = Math.max(listing.price, 1);
   const score = Math.max(0, Math.min(100, Math.round((profit / base) * 100)));
-  return { value: round2(value), profit, score, comps: soldPrices.length };
+  return { value: round2(value), profit, score, comps: override != null ? 0 : soldPrices.length };
 }
 
 /** Parse sold prices from an eBay sold/completed search results page (old s-item and new s-card markup). */
@@ -43,8 +47,9 @@ export function createCompsFetcher({ db, fetchFn = fetch }) {
     const key = 'sold:' + keywords.toLowerCase().trim();
     const cached = db.cacheGet(key, TWELVE_H);
     if (cached) return cached;
-    const url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(keywords)}&LH_Sold=1&LH_Complete=1&_ipg=60`;
-    const res = await fetchFn(url, { headers: { 'user-agent': UA, 'accept-language': 'en-US' } });
+    // eBay UK sold listings, UK sellers only (LH_PrefLoc=1).
+    const url = `https://www.ebay.co.uk/sch/i.html?_nkw=${encodeURIComponent(keywords)}&LH_Sold=1&LH_Complete=1&LH_PrefLoc=1&_ipg=60`;
+    const res = await fetchFn(url, { headers: { 'user-agent': UA, 'accept-language': 'en-GB' } });
     if (!res.ok) throw new Error(`eBay sold comps HTTP ${res.status}`);
     const prices = parseSold(await res.text());
     db.cacheSet(key, prices);

@@ -1,12 +1,12 @@
 import { parsePrice } from '../match.js';
 
-const PRICE_LINE = /^(?:free|[A-Z]{0,3}\s?\$\s?[\d,]+(?:\.\d{1,2})?)$/i;
+const PRICE_LINE = /^(?:free|[A-Z]{0,3}\s?[$£€]\s?[\d,]+(?:\.\d{1,2})?)$/i;
 
 /**
  * Turn raw anchor cards {href, text, img, alt} into Listings.
  * Text lines: the first price-looking line is the price; the remaining lines are title then location.
  */
-export function parseCards(cards, { source, idPattern, urlFor, locationLine = true }) {
+export function parseCards(cards, { source, idPattern, urlFor, locationLine = true, titleFor }) {
   const out = [];
   const seen = new Set();
   for (const c of cards || []) {
@@ -18,7 +18,9 @@ export function parseCards(cards, { source, idPattern, urlFor, locationLine = tr
     const priceIdx = lines.findIndex(l => PRICE_LINE.test(l));
     const price = priceIdx >= 0 ? parsePrice(lines[priceIdx]) : null;
     const rest = lines.filter((l, i) => i !== priceIdx && !PRICE_LINE.test(l));
-    const title = rest[0] || String(c.alt || '').replace(/\s+in\s+[^,]+,\s*[A-Z]{2}$/, '').trim();
+    const title = titleFor
+      ? titleFor(c, m)
+      : rest[0] || String(c.alt || '').replace(/\s+in\s+[^,]+(?:,\s*[A-Z]{2})?$/, '').trim();
     if (!title) continue;
     seen.add(id);
     out.push({
@@ -26,7 +28,7 @@ export function parseCards(cards, { source, idPattern, urlFor, locationLine = tr
       id,
       title,
       price,
-      url: urlFor(id),
+      url: urlFor(id, c),
       image: c.img || null,
       location: locationLine && rest[1] ? rest[1] : null,
       postedAt: null,

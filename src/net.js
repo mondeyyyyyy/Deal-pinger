@@ -1,4 +1,5 @@
-import { ProxyAgent } from 'undici';
+// Use undici's own fetch: Node's built-in fetch bundles a different undici version that rejects this ProxyAgent.
+import { fetch, ProxyAgent } from 'undici';
 import { UA } from './comps.js';
 
 export function createFetch(config) {
@@ -7,7 +8,7 @@ export function createFetch(config) {
     ...opts,
     dispatcher,
     signal: opts.signal || AbortSignal.timeout(30000),
-    headers: { 'user-agent': UA, 'accept-language': 'en-US,en;q=0.9', ...(opts.headers || {}) },
+    headers: { 'user-agent': UA, 'accept-language': 'en-GB,en;q=0.9', ...(opts.headers || {}) },
   });
 }
 

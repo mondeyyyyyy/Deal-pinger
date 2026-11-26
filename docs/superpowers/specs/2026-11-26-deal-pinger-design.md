@@ -60,3 +60,14 @@ a resale marketplace, so they can reach the seller before other flippers.
   safe checkout; spending money on a mis-parsed listing is the costliest failure).
 - **QoL:** exclude words, min-profit alert threshold, quiet hours (global), save/dismiss hits,
   test notification, per-source health status, pause search, dark mode.
+
+## UK edition (requested 2026-11-26)
+- **UK marketplaces only:** eBay UK (ebay.co.uk, EBAY_GB, GBP), Facebook Marketplace (UK city),
+  Vinted (vinted.co.uk), Gumtree, Depop. Craigslist, OfferUp, Mercari removed (US-only / unused in UK).
+- Currency £; postcode instead of zip; timezone default Europe/London.
+- Selling fee is a global setting, default 0% (eBay UK private sellers pay no final value fee
+  since Oct 2024; Vinted charges sellers nothing). Shipping default £4.
+- Per-search manual resale value override (used instead of eBay sold median when set).
+- Price-drop alerts: a previously seen matching listing whose price falls by ≥5% alerts again.
+- Feed sort by best profit. Old data pruned (seen > 45 days, non-saved hits > 60 days).
+- "make it better" skill requested by user does not exist; improvements chosen by builder.

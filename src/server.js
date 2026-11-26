@@ -27,13 +27,14 @@ function cleanSearch(body, { partial }) {
     if (body.sources.some(s => !SOURCE_IDS.includes(s))) return err('Unknown marketplace');
     out.sources = [...new Set(body.sources)];
   }
-  for (const k of ['minPrice', 'maxPrice', 'minProfit', 'shipEstimate', 'radius']) {
+  for (const k of ['minPrice', 'maxPrice', 'minProfit', 'shipEstimate', 'radius', 'resaleOverride']) {
     if (body[k] === undefined) continue;
     const v = num(body[k]);
     if (Number.isNaN(v) || (v != null && v < 0)) return err(`${k} must be a positive number`);
     if (k === 'shipEstimate' || k === 'radius') { if (v != null) out[k] = v; } else out[k] = v;
   }
-  for (const k of ['zip', 'excludeWords', 'messageTemplate']) if (body[k] !== undefined) out[k] = String(body[k]).trim();
+  if (body.zip !== undefined) out.zip = String(body.zip).trim().toUpperCase(); // UK postcode
+  for (const k of ['excludeWords', 'messageTemplate']) if (body[k] !== undefined) out[k] = String(body[k]).trim();
   if (body.enabled !== undefined) out.enabled = !!body.enabled;
   return [out, null];
 }
@@ -134,6 +135,11 @@ export function createApp({ db, config, runNow, notify, health }) {
       const v = req.body[k] || null;
       if (v && !HHMM.test(v)) return res.status(400).json({ error: `${k} must be HH:MM` });
       patch[k] = v;
+    }
+    if (req.body?.feePct !== undefined) {
+      const f = num(req.body.feePct);
+      if (f == null || Number.isNaN(f) || f < 0 || f > 50) return res.status(400).json({ error: 'Selling fee must be between 0 and 50%' });
+      patch.feePct = f;
     }
     res.json(db.setSettings(patch));
   });

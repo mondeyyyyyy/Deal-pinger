@@ -13,10 +13,9 @@ export function loadConfig(env = process.env) {
     vapidSubject: env.VAPID_SUBJECT || 'mailto:admin@example.com',
     ebayAppId: env.EBAY_APP_ID || '',
     ebayCertId: env.EBAY_CERT_ID || '',
-    craigslistSite: env.CRAIGSLIST_SITE || 'sfbay',
-    facebookLocation: env.FACEBOOK_LOCATION || 'sanfrancisco',
+    facebookLocation: env.FACEBOOK_LOCATION || 'london',
     proxyUrl: env.PROXY_URL || '',
     pollIntervalSec: Number(env.POLL_INTERVAL_SEC || 90),
-    timezone: env.TZ || 'America/Los_Angeles',
+    timezone: env.TZ || 'Europe/London',
   };
 }

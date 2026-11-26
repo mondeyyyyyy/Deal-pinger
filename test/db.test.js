@@ -6,10 +6,10 @@ const L = (id, price = 10) => ({ source: 'ebay', id, title: 't' + id, price, url
 
 test('search round-trip', () => {
   const db = openDb(':memory:');
-  const s = db.addSearch({ name: 'PS5', keywords: 'ps5', minPrice: 50, maxPrice: 300, zip: '94110', radius: 30, sources: ['ebay', 'craigslist'] });
+  const s = db.addSearch({ name: 'PS5', keywords: 'ps5', minPrice: 50, maxPrice: 300, zip: '94110', radius: 30, sources: ['ebay', 'vinted'] });
   assert.equal(s.enabled, true);
-  assert.deepEqual(s.sources, ['ebay', 'craigslist']);
-  assert.equal(s.shipEstimate, 12);
+  assert.deepEqual(s.sources, ['ebay', 'vinted']);
+  assert.equal(s.shipEstimate, 4);
   assert.equal(db.listSearches().length, 1);
   const u = db.updateSearch(s.id, { enabled: false, maxPrice: 250, excludeWords: 'broken' });
   assert.equal(u.enabled, false);
@@ -58,7 +58,56 @@ test('price history and settings', () => {
   const hist = db.priceHistory(s.id);
   assert.equal(hist.length, 1);
   assert.equal(hist[0].price, 100);
-  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null });
+  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0 });
   db.setSettings({ quietStart: '23:00', quietEnd: '07:00' });
   assert.equal(db.getSettings().quietStart, '23:00');
+});
+
+test('priceDrops reports listings that got cheaper and stores the new price', () => {
+  const db = openDb(':memory:');
+  const s = db.addSearch({ name: 'x', keywords: 'x', sources: ['ebay'] });
+  db.markSeen(s.id, [L('1', 100), L('2', 100), L('3', null)]);
+  const drops = db.priceDrops(s.id, [L('1', 80), L('2', 97), L('3', 50), L('4', 10)], 0.05);
+  assert.deepEqual(drops.map(d => [d.listing.id, d.previousPrice]), [['1', 100]]);
+  assert.equal(db.priceDrops(s.id, [L('1', 80)], 0.05).length, 0);
+  assert.equal(db.priceDrops(s.id, [L('1', 60)], 0.05)[0].previousPrice, 80);
+});
+
+test('prune removes old seen rows and old unsaved hits', () => {
+  const db = openDb(':memory:');
+  const s = db.addSearch({ name: 'x', keywords: 'x', sources: ['ebay'] });
+  db.markSeen(s.id, [L('old'), L('new')]);
+  const h1 = db.addHit(s.id, L('old'));
+  const h2 = db.addHit(s.id, L('kept'));
+  db.setHitStatus(h2.id, 'saved');
+  db.raw.prepare("UPDATE seen SET seenAt = datetime('now', '-50 days') WHERE listingId = 'old'").run();
+  db.raw.prepare("UPDATE hits SET createdAt = datetime('now', '-70 days')").run();
+  db.prune({ seenDays: 45, hitDays: 60 });
+  assert.equal(db.markSeen(s.id, [L('old'), L('new')]).length, 1);
+  assert.deepEqual(db.recentHits().map(h => h.id), [h2.id]);
+  assert.ok(h1.id);
+});
+
+test('settings include selling fee', () => {
+  const db = openDb(':memory:');
+  assert.equal(db.getSettings().feePct, 0);
+  db.setSettings({ feePct: 12.8 });
+  assert.equal(db.getSettings().feePct, 12.8);
+});
+
+test('resaleOverride is stored on a search', () => {
+  const db = openDb(':memory:');
+  const s = db.addSearch({ name: 'x', keywords: 'x', sources: ['ebay'], resaleOverride: 150 });
+  assert.equal(s.resaleOverride, 150);
+  assert.equal(s.shipEstimate, 4);
+});
+
+test('prune keeps the push keys in the cache', () => {
+  const db = openDb(':memory:');
+  db.cacheSet('vapid', { publicKey: 'p' });
+  db.cacheSet('sold:switch', [1]);
+  db.raw.prepare('UPDATE cache SET at = 0').run();
+  db.prune();
+  assert.deepEqual(db.cacheGet('vapid', Infinity), { publicKey: 'p' });
+  assert.equal(db.cacheGet('sold:switch', Infinity), undefined);
 });

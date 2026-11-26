@@ -2,7 +2,10 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const safeUrl = (u) => (/^https?:\/\//i.test(u || '') ? u : '#');
-const money = (n) => (n == null ? '—' : '$' + (Number.isInteger(n) ? n : n.toFixed(2)));
+const money = (v) => {
+  const n = v == null || v === '' ? NaN : Number(v);
+  return Number.isFinite(n) ? '£' + (Number.isInteger(n) ? n : n.toFixed(2)) : '—';
+};
 
 let SOURCES = [];
 let searches = [];
@@ -94,14 +97,15 @@ function messageFor(hit) {
   const s = searches.find((x) => x.id === hit.searchId);
   const tpl = s?.messageTemplate || 'Hi! Is this still available?';
   const p = hit.listing.price;
-  const offer = p ? '$' + Math.max(1, Math.round((p * 0.85) / 5) * 5) : 'a fair price';
+  const offer = p ? '£' + Math.max(1, Math.round((p * 0.85) / 5) * 5) : 'a fair price';
   return tpl.replaceAll('{title}', hit.listing.title).replaceAll('{price}', money(p)).replaceAll('{offer}', offer);
 }
 
 function renderDeals() {
   let list = hits;
   if (dealFilter === 'saved') list = hits.filter((h) => h.status === 'saved');
-  if (dealFilter === 'profit') list = hits.filter((h) => h.estimate && h.estimate.profit > 0);
+  if (dealFilter === 'profit') list = hits.filter((h) => h.estimate && h.estimate.profit > 0).sort((a, b) => b.estimate.profit - a.estimate.profit);
+  if (dealFilter === 'drops') list = hits.filter((h) => h.listing.previousPrice != null);
   const el = $('#deals');
   if (!list.length) {
     el.innerHTML = searches.length || dealFilter !== 'all'
@@ -119,9 +123,9 @@ function renderDeals() {
       <a class="deal" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">
         <div class="thumb" ${img}>${l.image ? '' : 'No photo'}</div>
         <div style="min-width:0">
-          <div class="price">${money(l.price)}</div>
+          <div class="price">${money(l.price)}${l.previousPrice != null ? `<span class="was">${money(l.previousPrice)}</span>` : ''}</div>
           <div class="title">${esc(l.title)}</div>
-          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${profit}</div>
+          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}</div>
           <div class="meta">${esc(ago(h.createdAt))}${l.location ? ' · ' + esc(l.location) : ''}${e ? ' · resells ~' + money(e.value) : ''}</div>
         </div>
       </a>
@@ -166,7 +170,10 @@ function renderSearches() {
     return;
   }
   el.innerHTML = searches.map((s) => {
-    const price = s.minPrice != null || s.maxPrice != null ? ` · ${money(s.minPrice ?? 0)}–${s.maxPrice != null ? money(s.maxPrice) : 'any'}` : '';
+    const lo = s.minPrice, hi = s.maxPrice;
+    const price = lo != null && hi != null ? ` · ${money(lo)}–${money(hi)}`
+      : hi != null ? ` · up to ${money(hi)}`
+      : lo != null ? ` · ${money(lo)}+` : '';
     return `<div class="row" data-id="${s.id}">
       <div class="grow" data-act="edit" style="cursor:pointer">
         <div class="sname">${esc(s.name)}</div>
@@ -208,20 +215,21 @@ function openSearchForm(s = null) {
       <label class="f"><span>What are you looking for?</span><input class="t" name="keywords" value="${v('keywords')}" placeholder="nintendo switch oled" required></label>
       <label class="f"><span>Name (optional)</span><input class="t" name="name" value="${v('name')}" placeholder="Switch flips"></label>
       <div class="two">
-        <label class="f"><span>Min price</span><input class="t" name="minPrice" inputmode="decimal" value="${v('minPrice')}" placeholder="$0"></label>
-        <label class="f"><span>Max price</span><input class="t" name="maxPrice" inputmode="decimal" value="${v('maxPrice')}" placeholder="Any"></label>
+        <label class="f"><span>Min price (£)</span><input class="t" name="minPrice" inputmode="decimal" value="${v('minPrice')}" placeholder="0"></label>
+        <label class="f"><span>Max price (£)</span><input class="t" name="maxPrice" inputmode="decimal" value="${v('maxPrice')}" placeholder="Any"></label>
       </div>
       <div class="two">
-        <label class="f"><span>Zip code</span><input class="t" name="zip" inputmode="numeric" value="${v('zip')}" placeholder="94110"></label>
+        <label class="f"><span>Postcode</span><input class="t" name="zip" autocapitalize="characters" value="${v('zip')}" placeholder="SW1A 1AA"></label>
         <label class="f"><span>Radius (miles)</span><input class="t" name="radius" inputmode="numeric" value="${v('radius', 25)}"></label>
       </div>
       <label class="f"><span>Skip listings containing (comma separated)</span><input class="t" name="excludeWords" value="${v('excludeWords')}" placeholder="broken, parts, box only, read"></label>
       <div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">Marketplaces</span><div class="srcs">${srcs}</div></div>
       <div class="two" style="margin-top:14px">
-        <label class="f"><span>Only ping if profit ≥</span><input class="t" name="minProfit" inputmode="decimal" value="${v('minProfit')}" placeholder="Always ping"></label>
-        <label class="f"><span>Shipping estimate</span><input class="t" name="shipEstimate" inputmode="decimal" value="${v('shipEstimate', 12)}"></label>
+        <label class="f"><span>Only ping if profit ≥ £</span><input class="t" name="minProfit" inputmode="decimal" value="${v('minProfit')}" placeholder="Always ping"></label>
+        <label class="f"><span>Postage cost (£)</span><input class="t" name="shipEstimate" inputmode="decimal" value="${v('shipEstimate', 4)}"></label>
       </div>
-      <label class="f"><span>Seller message ({title}, {price}, {offer})</span><textarea class="t" name="messageTemplate" rows="2">${v('messageTemplate', 'Hi! Is this still available? I can pick up today for {offer}.')}</textarea></label>
+      <label class="f"><span>I can resell these for (£)</span><input class="t" name="resaleOverride" inputmode="decimal" value="${v('resaleOverride')}" placeholder="Leave empty to use eBay sold prices"></label>
+      <label class="f"><span>Seller message ({title}, {price}, {offer})</span><textarea class="t" name="messageTemplate" rows="2">${v('messageTemplate', 'Hi! Is this still available? I can collect today for {offer}.')}</textarea></label>
       <div class="err" id="formErr"></div>
       <button class="btn primary" style="width:100%">${s ? 'Save' : 'Start watching'}</button>
       ${s ? `<div style="display:flex;gap:8px;margin-top:10px">
@@ -279,7 +287,7 @@ async function showHistory(s) {
   const sold = h.soldMedian != null ? `<line x1="${P}" x2="${W - P}" y1="${y(h.soldMedian)}" y2="${y(h.soldMedian)}" stroke="var(--good)" stroke-width="3" stroke-dasharray="10 8"/>` : '';
   el.innerHTML = `<div class="card" style="padding:14px;margin-top:14px">
     <div class="sname">Asking prices</div>
-    <div class="sub">${h.points.length} listings · median ask ${money(h.askMedian)}${h.soldMedian != null ? ` · eBay sold median ${money(h.soldMedian)} (${h.soldCount} sales)` : ''}</div>
+    <div class="sub" style="white-space:normal">${h.points.length} listings · median ask ${money(h.askMedian)}${h.soldMedian != null ? ` · eBay UK sold median ${money(h.soldMedian)} (${h.soldCount} sales)` : ''}</div>
     <svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Asking price history">${sold}${dots}</svg>
     <div class="legend"><span>${money(lo)} – ${money(hi)} · oldest → newest</span><span style="color:var(--accent)">● asking</span>${sold ? '<span style="color:var(--good)">┅ sold median</span>' : ''}</div>
   </div>`;
@@ -363,6 +371,12 @@ async function saveQuiet() {
     toast('Quiet hours saved');
   } catch (err) { toast(err.message); }
 }
+$('#feePct').addEventListener('change', async () => {
+  try {
+    await api('/api/settings', { method: 'PUT', body: { feePct: $('#feePct').value || 0 } });
+    toast('Selling fee saved');
+  } catch (err) { toast(err.message); }
+});
 $('#quietStart').addEventListener('change', saveQuiet);
 $('#quietEnd').addEventListener('change', saveQuiet);
 
@@ -373,6 +387,7 @@ async function loadSettings() {
   const [settings, status] = await Promise.all([api('/api/settings'), api('/api/status')]);
   $('#quietStart').value = settings.quietStart || '';
   $('#quietEnd').value = settings.quietEnd || '';
+  $('#feePct').value = settings.feePct || '';
   $('#status').innerHTML = status.sources.map((s) => {
     const cls = s.ok === true ? 'ok' : s.ok === false ? 'bad' : '';
     const sub = s.ok === undefined ? 'Not checked yet'

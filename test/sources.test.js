@@ -18,20 +18,9 @@ function assertListing(l, source) {
   for (const k of ['image', 'location', 'postedAt']) assert.ok(l[k] === null || typeof l[k] === 'string', k);
 }
 
-test('all five sources registered', () => {
-  assert.deepEqual(SOURCE_IDS, ['ebay', 'craigslist', 'facebook', 'offerup', 'mercari']);
+test('only UK marketplaces are registered', () => {
+  assert.deepEqual(SOURCE_IDS, ['ebay', 'facebook', 'vinted', 'gumtree', 'depop']);
   for (const id of SOURCE_IDS) assert.equal(typeof SOURCES[id].search, 'function');
-});
-
-test('craigslist parse', () => {
-  const ls = SOURCES.craigslist.parse(fx('craigslist.html'));
-  assert.equal(ls.length, 2);
-  ls.forEach(l => assertListing(l, 'craigslist'));
-  assert.equal(ls[0].id, '7801234567');
-  assert.equal(ls[0].price, 1180);
-  assert.equal(ls[0].location, 'mission district');
-  assert.equal(ls[1].title, 'Switch Lite & case');
-  assert.equal(ls[1].price, 0);
 });
 
 test('ebay browse api parse', () => {
@@ -39,48 +28,91 @@ test('ebay browse api parse', () => {
   assert.equal(ls.length, 2);
   ls.forEach(l => assertListing(l, 'ebay'));
   assert.equal(ls[0].price, 215);
-  assert.equal(ls[0].location, 'Austin, TX');
   assert.equal(ls[1].price, null);
+  assert.equal(ls[1].url, 'https://www.ebay.co.uk/itm/222');
 });
 
-test('ebay html fallback parse', () => {
+test('ebay api request targets eBay UK in GBP', () => {
+  const url = SOURCES.ebay.buildApiUrl({ keywords: 'switch', minPrice: 50, maxPrice: 150 });
+  assert.match(decodeURIComponent(url), /price:\[50\.\.150\],priceCurrency:GBP/);
+  assert.match(decodeURIComponent(url), /itemLocationCountry:GB/);
+});
+
+test('ebay html fallback parse uses ebay.co.uk links', () => {
   const ls = SOURCES.ebay.parseHtml(fx('ebay-search.html'));
   assert.equal(ls.length, 1);
   assertListing(ls[0], 'ebay');
-  assert.equal(ls[0].id, '365550001111');
-  assert.equal(ls[0].title, 'Nintendo Switch V2 Console');
+  assert.equal(ls[0].url, 'https://www.ebay.co.uk/itm/365550001111');
   assert.equal(ls[0].price, 149.99);
 });
 
-test('facebook cards', () => {
+test('facebook cards in pounds', () => {
   const ls = SOURCES.facebook.parse(cards.facebook);
   assert.equal(ls.length, 2);
   ls.forEach(l => assertListing(l, 'facebook'));
-  assert.equal(ls[0].id, '1122334455667788');
-  assert.equal(ls[0].url, 'https://www.facebook.com/marketplace/item/1122334455667788/');
   assert.equal(ls[0].price, 120);
   assert.equal(ls[0].title, 'Nintendo Switch with dock');
-  assert.equal(ls[0].location, 'Daly City, CA');
+  assert.equal(ls[0].location, 'Croydon');
   assert.equal(ls[1].price, 0);
 });
 
-test('offerup cards', () => {
-  const [l] = SOURCES.offerup.parse(cards.offerup);
-  assertListing(l, 'offerup');
-  assert.equal(l.price, 180);
-  assert.equal(l.title, 'Nintendo Switch OLED');
-  assert.equal(l.location, 'San Jose, CA');
+test('facebook url uses the UK city and km radius', () => {
+  const u = SOURCES.facebook.buildUrl({ keywords: 'switch', radius: 10 }, { facebookLocation: 'manchester' });
+  assert.match(u, /facebook\.com\/marketplace\/manchester\/search\?/);
+  assert.match(u, /radius=16/);
 });
 
-test('mercari cards take the first (current) price', () => {
-  const [l] = SOURCES.mercari.parse(cards.mercari);
-  assertListing(l, 'mercari');
-  assert.equal(l.id, 'm81234567890');
-  assert.equal(l.price, 95);
-  assert.equal(l.url, 'https://www.mercari.com/us/item/m81234567890/');
+test('vinted api parse', () => {
+  const ls = SOURCES.vinted.parse(JSON.parse(fx('vinted.json')));
+  assert.equal(ls.length, 2);
+  ls.forEach(l => assertListing(l, 'vinted'));
+  assert.equal(ls[0].id, '4812345678');
+  assert.equal(ls[0].price, 85);
+  assert.equal(ls[0].image, 'https://images1.vinted.net/t/a.jpeg');
+  assert.equal(ls[1].price, 20);
+  assert.equal(ls[1].url, 'https://www.vinted.co.uk/items/4812345679-switch-games-bundle');
+});
+
+test('vinted api url', () => {
+  const u = SOURCES.vinted.buildApiUrl({ keywords: 'switch lite', minPrice: 10, maxPrice: 90 });
+  assert.match(u, /^https:\/\/www\.vinted\.co\.uk\/api\/v2\/catalog\/items\?/);
+  assert.match(u, /search_text=switch\+lite/);
+  assert.match(u, /order=newest_first/);
+  assert.match(u, /price_from=10/);
+  assert.match(u, /price_to=90/);
+});
+
+test('gumtree cards', () => {
+  const ls = SOURCES.gumtree.parse(cards.gumtree);
+  assert.equal(ls.length, 1);
+  assertListing(ls[0], 'gumtree');
+  assert.equal(ls[0].id, '1489876543');
+  assert.equal(ls[0].price, 180);
+  assert.equal(ls[0].title, 'Nintendo Switch OLED boxed');
+  assert.equal(ls[0].location, 'Hackney, London');
+  assert.equal(ls[0].url, 'https://www.gumtree.com/p/video-games-consoles/nintendo-switch-oled-boxed/1489876543');
+});
+
+test('gumtree url uses postcode and distance', () => {
+  const u = SOURCES.gumtree.buildUrl({ keywords: 'switch', zip: 'SW1A 1AA', radius: 15, maxPrice: 200 });
+  assert.match(u, /search_location=SW1A\+1AA/);
+  assert.match(u, /distance=15/);
+  assert.match(u, /max_price=200/);
+  assert.match(u, /sort=date/);
+});
+
+test('depop cards: title from alt, else from the product slug; current price first', () => {
+  const ls = SOURCES.depop.parse(cards.depop);
+  assert.equal(ls.length, 2);
+  ls.forEach(l => assertListing(l, 'depop'));
+  assert.equal(ls[0].title, 'Nike Air Max 90 Trainers Uk9');
+  assert.equal(ls[0].price, 45);
+  assert.equal(ls[1].title, 'Ralph Lauren quarter zip navy');
+  assert.equal(ls[1].price, 30);
+  assert.equal(ls[1].url, 'https://www.depop.com/products/someone-ralph-lauren-quarter-zip-navy/');
 });
 
 test('parseCards dedupes repeated anchors', () => {
   const c = cards.facebook[0];
-  assert.equal(parseCards([c, c], { source: 'facebook', base: 'https://www.facebook.com', idPattern: /\/marketplace\/item\/(\d+)/, urlFor: id => `https://www.facebook.com/marketplace/item/${id}/` }).length, 1);
+  assert.equal(parseCards([c, c], { source: 'facebook', idPattern: /\/marketplace\/item\/(\d+)/, urlFor: id => `https://www.facebook.com/marketplace/item/${id}/` }).length, 1);
 });

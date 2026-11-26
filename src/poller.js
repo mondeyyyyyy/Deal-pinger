@@ -2,6 +2,8 @@ import { matches } from './match.js';
 import { estimate } from './comps.js';
 
 const SOURCE_TIMEOUT_MS = 120000;
+const PRICE_DROP_FRACTION = 0.05; // alert again when a seen listing gets at least 5% cheaper
+const PRUNE_EVERY_MS = 3600 * 1000;
 
 export function createHealth() {
   const state = {};
@@ -41,11 +43,18 @@ export async function runSearchOnce(search, { db, sources, notify, ctx, getSoldP
     }
     // Seeded = one successful fetch has happened for this source since the search's filters last changed.
     const firstRun = !db.isSeeded(search.id, sourceId);
-    const fresh = db.markSeen(search.id, listings.filter(l => matches(l, search)));
+    const matching = listings.filter(l => matches(l, search));
+    const drops = db.priceDrops(search.id, matching, PRICE_DROP_FRACTION);
+    const fresh = db.markSeen(search.id, matching);
     if (firstRun) { db.markSeeded(search.id, sourceId); continue; }
-    for (const listing of fresh) {
-      const prices = await sold();
-      const est = prices ? estimate(search, listing, prices) : null;
+    const alerts = [
+      ...fresh,
+      ...drops.map(d => ({ ...d.listing, previousPrice: d.previousPrice })),
+    ];
+    const { feePct } = db.getSettings();
+    for (const listing of alerts) {
+      const prices = search.resaleOverride != null ? [] : await sold();
+      const est = prices ? estimate(search, listing, prices, { feePct }) : null;
       const hit = db.addHit(search.id, listing, est);
       newHits.push(hit);
       const worthIt = search.minProfit == null || (est && est.profit >= search.minProfit);
@@ -78,7 +87,12 @@ export function startPoller(deps, { intervalSec = 90, log = console } = {}) {
     return r;
   };
 
+  let lastPrune = 0;
   const tick = async () => {
+    if (Date.now() - lastPrune > PRUNE_EVERY_MS) {
+      lastPrune = Date.now();
+      deps.db.prune();
+    }
     for (const { id } of deps.db.listSearches()) {
       if (stopped) return;
       // Re-read inside the queue so an edit made while waiting is respected.
