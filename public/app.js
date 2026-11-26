@@ -1,3 +1,5 @@
+import { buildMessage, DEFAULT_TEMPLATE } from './messages.js';
+
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -103,17 +105,17 @@ async function loadDeals(manual) {
 
 function messageFor(hit) {
   const s = searches.find((x) => x.id === hit.searchId);
-  const tpl = s?.messageTemplate || 'Hi! Is this still available?';
-  const p = hit.listing.price;
-  const offer = p ? '£' + Math.max(1, Math.round((p * 0.85) / 5) * 5) : 'a fair price';
-  return tpl.replaceAll('{title}', hit.listing.title).replaceAll('{price}', money(p)).replaceAll('{offer}', offer);
+  // Only mentions collecting on Facebook/Gumtree, or when the listing itself mentions collection.
+  return buildMessage(s?.messageTemplate || DEFAULT_TEMPLATE, hit.listing);
 }
 
 function renderDeals() {
-  let list = hits;
-  if (dealFilter === 'saved') list = hits.filter((h) => h.status === 'saved');
-  if (dealFilter === 'profit') list = hits.filter((h) => h.estimate && h.estimate.profit > 0).sort((a, b) => b.estimate.profit - a.estimate.profit);
-  if (dealFilter === 'drops') list = hits.filter((h) => h.listing.previousPrice != null);
+  const bestOf = (h) => h.estimate?.bestProfit ?? h.estimate?.profit ?? null;
+  let list = hits.filter((h) => h.status !== 'flagged');
+  if (dealFilter === 'saved') list = list.filter((h) => h.status === 'saved');
+  if (dealFilter === 'profit') list = list.filter((h) => bestOf(h) > 0).sort((a, b) => bestOf(b) - bestOf(a));
+  if (dealFilter === 'drops') list = list.filter((h) => h.listing.previousPrice != null);
+  if (dealFilter === 'flagged') list = hits.filter((h) => h.status === 'flagged');
   const el = $('#deals');
   if (!list.length) {
     el.innerHTML = searches.length || dealFilter !== 'all'
@@ -125,7 +127,14 @@ function renderDeals() {
   el.innerHTML = list.map((h) => {
     const l = h.listing;
     const e = h.estimate;
-    const profit = e ? `<span class="profit ${e.profit >= 0 ? 'up' : 'down'}">${e.profit >= 0 ? '+' : '−'}${money(Math.abs(e.profit))} profit</span>` : '';
+    const chip = (n, label) => `<span class="profit ${n >= 0 ? 'up' : 'down'}">${n >= 0 ? '+' : '−'}${money(Math.abs(n))} ${label}</span>`;
+    const profit = e?.profit != null ? chip(e.profit, 'profit') : '';
+    const cexChip = e?.cex ? `<span class="cexchip">CeX ${chip(e.cex.cashProfit, 'cash').replace(/<[^>]+>/g, '')}</span>` : '';
+    const scam = l.scam && l.scam.risk !== 'low'
+      ? `<span class="scam ${esc(l.scam.risk)}">⚠️ ${l.scam.risk === 'high' ? 'Likely scam' : 'Check seller'}</span>` : '';
+    const seller = l.seller ? [l.seller.name, l.seller.ratings != null ? `${l.seller.ratings} ratings` : null].filter(Boolean).join(' · ') : '';
+    const valueLine = [e?.value != null ? `resells ~${money(e.value)}` : null, e?.cex ? `CeX sells ${money(e.cex.sell)}, pays ${money(e.cex.cash)} cash / ${money(e.cex.voucher)} voucher` : null].filter(Boolean).join(' · ');
+    const buy = l.buyUrl && safeUrl(l.buyUrl) !== '#' && l.scam?.risk !== 'high';
     const img = l.image && safeUrl(l.image) !== '#' ? `data-img="${esc(l.image)}"` : '';
     const hot = e && e.score >= 50 ? '<span class="hot">🔥 Hot</span>' : '';
     const when = l.postedAt ? `listed ${ago(l.postedAt)}` : `found ${ago(h.createdAt)}`;
@@ -135,13 +144,18 @@ function renderDeals() {
         <div style="min-width:0">
           <div class="price">${money(l.price)}${l.previousPrice != null ? `<span class="was">${money(l.previousPrice)}</span>` : ''}</div>
           <div class="title">${esc(l.title)}</div>
-          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}</div>
-          <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${e ? ' · resells ~' + money(e.value) : ''}</div>
+          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${scam || hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}${cexChip}</div>
+          <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}</div>
+          ${valueLine ? `<div class="meta">${esc(valueLine)}</div>` : ''}
+          ${scam ? `<div class="warn">${esc(l.scam.reasons.join(' · '))}</div>` : ''}
         </div>
       </a>
       <div class="actions">
-        <a class="btn sm primary" data-act="msg" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Message</a>
-        <button class="btn sm" data-act="save">${h.status === 'saved' ? 'Saved ✓' : 'Save'}</button>
+        ${buy ? `<a class="btn sm primary" data-act="buy" href="${esc(safeUrl(l.buyUrl))}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Buy now</a>` : ''}
+        <a class="btn sm ${buy ? '' : 'primary'}" data-act="msg" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Message</a>
+        ${h.status === 'flagged'
+          ? '<button class="btn sm" data-act="unflag">Not a scam</button>'
+          : `<button class="btn sm x" data-act="save" aria-label="Save">${h.status === 'saved' ? '★' : '☆'}</button>`}
         <button class="btn sm" data-act="bought">Bought</button>
         <button class="btn sm x" data-act="dismiss" aria-label="Hide">✕</button>
       </div>
@@ -156,6 +170,15 @@ $('#deals').addEventListener('click', async (e) => {
   if (!act) return;
   const card = e.target.closest('article');
   const hit = hits.find((h) => h.id === Number(card.dataset.id));
+  if (act === 'buy') return; // the link opens checkout
+  if (act === 'unflag') {
+    e.preventDefault();
+    await api(`/api/hits/${hit.id}`, { method: 'PUT', body: { status: 'new' } });
+    hit.status = 'new';
+    renderDeals();
+    toast('Moved back to your deals');
+    return;
+  }
   if (act === 'msg') {
     // Keep this synchronous so iOS treats the link open as a user gesture.
     navigator.clipboard?.writeText(messageFor(hit)).then(() => toast('Message copied. Paste it to the seller.'), () => {});
@@ -228,7 +251,7 @@ function openSheet(html) {
 function closeSheet() { $('#sheet').classList.add('hidden'); }
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet' || e.target.closest('[data-close]')) closeSheet(); });
 
-const EVERY = [[30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [900, '15 minutes']];
+const EVERY = [[15, '15 seconds'], [30, '30 seconds'], [60, '1 minute'], [120, '2 minutes'], [300, '5 minutes'], [900, '15 minutes']];
 function everyLabel(sec) {
   const hit = EVERY.find(([n]) => n === sec);
   return hit ? hit[1].replace(' seconds', 's').replace(' minutes', ' min').replace(' minute', ' min') : `${sec}s`;
@@ -254,7 +277,7 @@ function openSearchForm(existing = null, { copy = false } = {}) {
         <label class="f"><span>Postcode</span><input class="t" name="zip" autocapitalize="characters" value="${v('zip')}" placeholder="SW1A 1AA"></label>
         <label class="f"><span>Radius (miles)</span><input class="t" name="radius" inputmode="numeric" value="${v('radius', 25)}"></label>
       </div>
-      <label class="f"><span>Check every</span><select class="t" name="intervalSec">${EVERY.map(([n, l]) => `<option value="${n}" ${n === every ? 'selected' : ''}>${l}${n === 30 ? ' (fastest)' : ''}</option>`).join('')}</select></label>
+      <label class="f"><span>Check every</span><select class="t" name="intervalSec">${EVERY.map(([n, l]) => `<option value="${n}" ${n === every ? 'selected' : ''}>${l}${n === 15 ? ' (fastest, Vinted & eBay)' : ''}</option>`).join('')}</select><span class="hint">Facebook, Gumtree and Depop are checked at most every 45 seconds.</span></label>
       <label class="f"><span>Skip listings containing (comma separated)</span><input class="t" name="excludeWords" value="${v('excludeWords')}" placeholder="broken, parts, box only, read"></label>
       <div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">Marketplaces</span><div class="srcs">${srcs}</div></div>
       <div class="two" style="margin-top:14px">
@@ -262,7 +285,16 @@ function openSearchForm(existing = null, { copy = false } = {}) {
         <label class="f"><span>Postage cost (£)</span><input class="t" name="shipEstimate" inputmode="decimal" value="${v('shipEstimate', 4)}"></label>
       </div>
       <label class="f"><span>I can resell these for (£)</span><input class="t" name="resaleOverride" inputmode="decimal" value="${v('resaleOverride')}" placeholder="Leave empty to use eBay sold prices"></label>
-      <label class="f"><span>Seller message ({title}, {price}, {offer})</span><textarea class="t" name="messageTemplate" rows="2">${v('messageTemplate', 'Hi! Is this still available? I can collect today for {offer}.')}</textarea></label>
+      <div class="f"><span style="display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600">CeX price</span>
+        <input type="hidden" name="cexBoxId" value="${v('cexBoxId')}"><input type="hidden" name="cexName" value="${v('cexName')}"><input type="hidden" name="cexMode" value="${v('cexMode', 'auto')}">
+        <div class="sub" id="cexChoice" style="white-space:normal;margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px"><button type="button" class="btn sm" id="cexFind">Pick CeX item</button><button type="button" class="btn sm" id="cexAuto">Auto</button><button type="button" class="btn sm" id="cexOff">Off</button></div>
+        <div class="card cexlist" id="cexResults" style="margin-top:8px"></div>
+      </div>
+      <label class="f"><span>Seller message</span><textarea class="t" name="messageTemplate" rows="2">${v('messageTemplate', DEFAULT_TEMPLATE)}</textarea>
+        <span class="hint">{offer} = about 85% of the price. {collect} becomes "I can collect today." only on Facebook/Gumtree or when the listing mentions collection; otherwise anything about collecting is left out.</span></label>
+      <label class="f"><span>Send this search to its own Discord channel (optional)</span><input class="t" name="discordWebhook" placeholder="${src?.hasDiscordWebhook ? 'Own channel set. Paste a new link to change it.' : 'https://discord.com/api/webhooks/…'}" autocomplete="off">
+        ${src?.hasDiscordWebhook && !copy ? '<label style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:14px"><input type="checkbox" name="clearDiscord"> Stop using its own channel</label>' : ''}</label>
       <div class="err" id="formErr"></div>
       <button class="btn primary" style="width:100%">${s ? 'Save' : 'Start watching'}</button>
       ${s ? `<div style="display:flex;gap:8px;margin-top:10px">
@@ -277,8 +309,11 @@ function openSearchForm(existing = null, { copy = false } = {}) {
   $('#searchForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const body = Object.fromEntries([...fd.entries()].filter(([k]) => k !== 'sources'));
+    const body = Object.fromEntries([...fd.entries()].filter(([k]) => k !== 'sources' && k !== 'clearDiscord'));
     body.sources = fd.getAll('sources');
+    // Leave the saved Discord channel alone unless a new one is pasted or it's cleared.
+    if (fd.get('clearDiscord')) body.discordWebhook = '';
+    else if (!body.discordWebhook) delete body.discordWebhook;
     try {
       if (s) await api(`/api/searches/${s.id}`, { method: 'PUT', body });
       else await api('/api/searches', { method: 'POST', body });
@@ -287,6 +322,7 @@ function openSearchForm(existing = null, { copy = false } = {}) {
       toast(s ? 'Saved' : 'Watching. You\'ll get a ping for new listings.');
     } catch (err) { $('#formErr').textContent = err.message; }
   });
+  setupCexPicker();
   if (!s) return;
   $('#dupSearch').addEventListener('click', () => openSearchForm(s, { copy: true }));
   $('#delSearch').addEventListener('click', async () => {
@@ -413,6 +449,9 @@ $('#feePct').addEventListener('change', async () => {
     toast('Selling fee saved');
   } catch (err) { toast(err.message); }
 });
+$('#scamFilter').addEventListener('change', async () => {
+  try { await api('/api/settings', { method: 'PUT', body: { scamFilter: $('#scamFilter').value } }); toast('Scam filter saved'); } catch (err) { toast(err.message); }
+});
 $('#quietStart').addEventListener('change', saveQuiet);
 $('#quietEnd').addEventListener('change', saveQuiet);
 
@@ -425,6 +464,7 @@ async function loadSettings() {
   $('#quietEnd').value = settings.quietEnd || '';
   $('#feePct').value = settings.feePct || '';
   renderChannels(settings);
+  $('#scamFilter').value = settings.scamFilter || 'hide';
   const took = (ms) => (ms == null ? '' : ` · took ${ms < 1000 ? ms + 'ms' : (ms / 1000).toFixed(1) + 's'}`);
   $('#status').innerHTML = status.sources.map((s) => {
     const cls = s.ok === true ? 'ok' : s.ok === false ? 'bad' : '';
@@ -436,6 +476,36 @@ async function loadSettings() {
   }).join('') + `<div class="row"><div class="grow sub" style="white-space:normal">Each search checks on its own timer (set it when editing a search) · ${status.subscriptions} iPhone(s) getting alerts</div></div>`;
 }
 
+
+/* ---------- CeX picker (inside the search form) ---------- */
+function setupCexPicker() {
+  const form = $('#searchForm');
+  const show = () => {
+    const mode = form.cexMode.value;
+    $('#cexChoice').textContent = mode === 'off' ? 'Off: no CeX prices for this search.'
+      : form.cexBoxId.value ? `Pinned: ${form.cexName.value || form.cexBoxId.value}`
+      : 'Auto: uses the CeX item that matches all your keywords (if any).';
+  };
+  show();
+  $('#cexAuto').addEventListener('click', () => { form.cexMode.value = 'auto'; form.cexBoxId.value = ''; form.cexName.value = ''; $('#cexResults').innerHTML = ''; show(); });
+  $('#cexOff').addEventListener('click', () => { form.cexMode.value = 'off'; $('#cexResults').innerHTML = ''; show(); });
+  $('#cexFind').addEventListener('click', async () => {
+    const q = form.keywords.value.trim();
+    if (!q) return toast('Type what you\'re looking for first');
+    $('#cexResults').innerHTML = '<div class="row sub">Searching CeX…</div>';
+    try {
+      const boxes = await api(`/api/cex/search?q=${encodeURIComponent(q)}`);
+      $('#cexResults').innerHTML = boxes.length ? boxes.map((b, i) => `<div class="row" data-i="${i}"><div class="grow"><div class="sname" style="white-space:normal">${esc(b.name)}</div><div class="sub">sells ${money(b.sell)} · cash ${money(b.cash)} · voucher ${money(b.voucher)}</div></div></div>`).join('')
+        : '<div class="row sub">Nothing found on CeX for that.</div>';
+      $$('#cexResults .row[data-i]').forEach((r) => r.addEventListener('click', () => {
+        const b = boxes[Number(r.dataset.i)];
+        form.cexMode.value = 'auto'; form.cexBoxId.value = b.id; form.cexName.value = b.name;
+        $('#cexResults').innerHTML = '';
+        show();
+      }));
+    } catch (err) { $('#cexResults').innerHTML = `<div class="row sub">${esc(err.message)}</div>`; }
+  });
+}
 
 /* ---------- flips ---------- */
 let flips = [];
@@ -522,7 +592,9 @@ function openFlipSheet(f) {
 }
 
 /* ---------- Telegram & Discord ---------- */
+let lastSettings = null;
 function renderChannels(st) {
+  lastSettings = st;
   $('#tgState').textContent = st.telegramConnected ? 'Connected' : st.telegramHasToken ? 'Bot added. Send /start to it in Telegram, then tap Set up → Link.' : 'Not connected';
   $('#tgSetup').textContent = st.telegramConnected ? 'Change' : 'Set up';
   $('#dcState').textContent = st.discordConnected ? 'Connected' : 'Not connected';
@@ -565,15 +637,29 @@ $('#dcSetup').addEventListener('click', () => {
   openSheet(`
     <h2>Discord alerts <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
     <p style="margin-top:0">In your Discord server: <b>Channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL</b>, then paste it here.</p>
-    <label class="f"><span>Webhook URL</span><input class="t" id="dcUrl" placeholder="https://discord.com/api/webhooks/..." autocomplete="off"></label>
+    <label class="f"><span>Webhook URL</span><input class="t" id="dcUrl" placeholder="${lastSettings?.discordConnected ? 'Connected. Paste a new link to change it.' : 'https://discord.com/api/webhooks/...'}" autocomplete="off"></label>
+    <label class="f"><span>Ping people with each alert</span><select class="t" id="dcMention">
+      <option value="">Nobody (just post)</option><option value="@here">@here (people online)</option><option value="@everyone">@everyone</option><option value="role">A role…</option></select></label>
+    <label class="f hidden" id="dcRoleWrap"><span>Role ID</span><input class="t" id="dcRole" inputmode="numeric" placeholder="Server settings → Roles → ⋯ → Copy Role ID"></label>
+    <p class="sub" style="white-space:normal">Each search can also post to its own channel: edit the search and paste that channel's webhook.</p>
     <div class="err" id="dcErr"></div>
     <div style="display:flex;gap:8px">
       <button class="btn primary" style="flex:1" id="dcSave">Save &amp; test</button>
       <button class="btn danger" style="flex:1" id="dcRemove">Remove</button>
     </div>`);
+  const cur = lastSettings?.discordMention || '';
+  $('#dcMention').value = /^\d+$/.test(cur) ? 'role' : cur;
+  $('#dcRole').value = /^\d+$/.test(cur) ? cur : '';
+  const roleUi = () => $('#dcRoleWrap').classList.toggle('hidden', $('#dcMention').value !== 'role');
+  roleUi();
+  $('#dcMention').addEventListener('change', roleUi);
   $('#dcSave').addEventListener('click', async () => {
     try {
-      renderChannels(await api('/api/settings', { method: 'PUT', body: { discordWebhook: $('#dcUrl').value } }));
+      const mention = $('#dcMention').value === 'role' ? $('#dcRole').value.trim() : $('#dcMention').value;
+      const body = { discordMention: mention };
+      if ($('#dcUrl').value.trim()) body.discordWebhook = $('#dcUrl').value.trim();
+      else if (!lastSettings?.discordConnected) throw new Error('Paste your Discord webhook link');
+      renderChannels(await api('/api/settings', { method: 'PUT', body }));
       await api('/api/test-push', { method: 'POST' });
       closeSheet();
       toast('Discord connected. Check the channel for a test message.');
