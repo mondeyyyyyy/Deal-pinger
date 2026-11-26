@@ -8,7 +8,7 @@ import { createNotifier, ensureVapid, linkTelegram } from './notify.js';
 import { createCompsFetcher } from './comps.js';
 import { createFetch } from './net.js';
 import { withPage } from './browser.js';
-import { SOURCES } from './sources/index.js';
+import { SOURCES, SOURCE_IDS } from './sources/index.js';
 
 const config = loadConfig();
 if (!config.appPassword) {
@@ -18,6 +18,7 @@ if (!config.appPassword) {
 fs.mkdirSync(config.dataDir, { recursive: true });
 const db = openDb(config.dbFile);
 ensureVapid(db, config, webpush);
+db.migrateSources(SOURCE_IDS);
 const health = createHealth();
 const fetchFn = createFetch(config);
 const ctx = { config, fetch: fetchFn, withPage };

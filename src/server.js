@@ -61,9 +61,10 @@ function publicSettings(s) {
 
 const CSV_HEAD = ['Title', 'Marketplace', 'Bought £', 'Bought on', 'Sold £', 'Sold on', 'Fees £', 'Profit £', 'Notes', 'Link'];
 function csvCell(v) {
+  if (typeof v === 'number') return String(v); // numbers (including losses) stay numbers
   let s = v == null ? '' : String(v);
-  if (/^[=+\-@]/.test(s)) s = "'" + s; // stop spreadsheets treating it as a formula
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // stop spreadsheets treating text as a formula
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function createApp({ db, config, runNow, notify, health, linkTelegram }) {

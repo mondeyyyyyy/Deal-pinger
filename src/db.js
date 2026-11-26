@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS searches (
 );
 CREATE TABLE IF NOT EXISTS seen (
   searchId INTEGER NOT NULL, source TEXT NOT NULL, listingId TEXT NOT NULL,
-  price REAL, seenAt TEXT NOT NULL DEFAULT (datetime('now')),
+  price REAL, seenAt TEXT NOT NULL DEFAULT (datetime('now')), lastSeenAt TEXT,
   PRIMARY KEY (searchId, source, listingId)
 );
 CREATE TABLE IF NOT EXISTS hits (
@@ -59,6 +59,7 @@ const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride'];
 const MIGRATIONS = [
   ['searches', 'resaleOverride', 'REAL'],
   ['searches', 'intervalSec', 'INTEGER NOT NULL DEFAULT 60'],
+  ['seen', 'lastSeenAt', 'TEXT'],
 ];
 
 function rowToSearch(r) {
@@ -123,18 +124,22 @@ export function openDb(file) {
     markSeeded(searchId, source) {
       db.prepare('INSERT OR IGNORE INTO seeded (searchId, source) VALUES (?, ?)').run(searchId, source);
     },
+    /** Record listings; returns the ones never seen before. Listings seen again get lastSeenAt refreshed. */
     markSeen(searchId, listings) {
       const ins = db.prepare('INSERT OR IGNORE INTO seen (searchId, source, listingId, price) VALUES (?, ?, ?, ?)');
+      const touch = db.prepare("UPDATE seen SET lastSeenAt = datetime('now') WHERE searchId = ? AND source = ? AND listingId = ?");
       const fresh = [];
       for (const l of listings) {
         const r = ins.run(searchId, l.source, String(l.id), l.price ?? null);
         if (r.changes) fresh.push(l);
+        else touch.run(searchId, l.source, String(l.id));
       }
       return fresh;
     },
     /**
-     * For listings already seen, return those whose price fell by at least minFraction,
-     * and remember the new lower price so the same drop doesn't alert twice.
+     * For listings already seen, return those whose price fell at least minFraction below the
+     * last price we alerted on (or first saw). Small drops accumulate until they cross the threshold;
+     * a price rise resets the reference so a later drop is measured from the higher price.
      */
     priceDrops(searchId, listings, minFraction = 0.05) {
       const get = db.prepare('SELECT price FROM seen WHERE searchId = ? AND source = ? AND listingId = ?');
@@ -143,15 +148,37 @@ export function openDb(file) {
       for (const l of listings) {
         if (l.price == null) continue;
         const row = get.get(searchId, l.source, String(l.id));
-        if (!row || row.price == null || l.price >= row.price) continue;
-        upd.run(l.price, searchId, l.source, String(l.id));
-        if (row.price - l.price >= row.price * minFraction) drops.push({ listing: l, previousPrice: row.price });
+        if (!row || row.price == null || l.price === row.price) continue;
+        if (l.price > row.price) { upd.run(l.price, searchId, l.source, String(l.id)); continue; }
+        if (row.price - l.price >= row.price * minFraction) {
+          upd.run(l.price, searchId, l.source, String(l.id));
+          drops.push({ listing: l, previousPrice: row.price });
+        }
       }
       return drops;
     },
-    /** Forget listings seen long ago and old hits the user didn't save, so the database stays small. */
+    /**
+     * One-time clean-up for databases from the US version: drop marketplaces that no longer exist,
+     * pause searches left with none, and re-seed everything so the switch doesn't cause an alert burst.
+     */
+    migrateSources(validIds) {
+      if (this.getSettingRaw('migratedUk')) return;
+      for (const s of this.listSearches()) {
+        const kept = s.sources.filter(id => validIds.includes(id));
+        if (kept.length !== s.sources.length) {
+          db.prepare('UPDATE searches SET sources = ?, enabled = ? WHERE id = ?')
+            .run(JSON.stringify(kept.length ? kept : ['vinted']), kept.length && s.enabled ? 1 : 0, s.id);
+        }
+      }
+      db.exec('DELETE FROM seeded');
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migratedUk', '1')").run();
+    },
+    getSettingRaw(key) {
+      return db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? null;
+    },
+    /** Forget listings not returned by any check for a long time, and old hits the user didn't save. */
     prune({ seenDays = 45, hitDays = 60 } = {}) {
-      db.prepare("DELETE FROM seen WHERE seenAt < datetime('now', ?)").run(`-${seenDays} days`);
+      db.prepare("DELETE FROM seen WHERE COALESCE(lastSeenAt, seenAt) < datetime('now', ?)").run(`-${seenDays} days`);
       db.prepare("DELETE FROM hits WHERE status != 'saved' AND createdAt < datetime('now', ?)").run(`-${hitDays} days`);
       // Only expire sold-price lookups; other cache rows (e.g. the push keys) must survive.
       db.prepare("DELETE FROM cache WHERE key LIKE 'sold:%' AND at < ?").run(Date.now() - 7 * 24 * 3600 * 1000);

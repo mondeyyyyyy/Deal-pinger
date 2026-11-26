@@ -78,7 +78,7 @@ test('linkTelegram finds the chat that messaged the bot', async () => {
   db.setSettings({ telegramBotToken: '123:AB' });
   const fetchFn = async (url) => {
     assert.equal(url, 'https://api.telegram.org/bot123:AB/getUpdates');
-    return { ok: true, json: async () => ({ ok: true, result: [{ message: { chat: { id: 1 } } }, { message: { chat: { id: 777, first_name: 'Me' } } }] }) };
+    return { ok: true, json: async () => ({ ok: true, result: [{ message: { text: '/start', chat: { id: 1, type: 'private' } } }, { message: { text: '/start', chat: { id: 777, type: 'private', first_name: 'Me' } } }] }) };
   };
   assert.equal(await linkTelegram(db, fetchFn), '777');
   assert.equal(db.getSettings().telegramChatId, '777');

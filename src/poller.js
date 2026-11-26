@@ -5,6 +5,7 @@ const SOURCE_TIMEOUT_MS = 120000;
 const COMPS_WAIT_MS = 2500; // never hold an alert longer than this for a sold-price lookup
 const PRICE_DROP_FRACTION = 0.05; // alert again when a seen listing gets at least 5% cheaper
 const PRUNE_EVERY_MS = 3600 * 1000;
+const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
 export function createHealth() {
   const state = {};
@@ -30,6 +31,8 @@ export async function runSourceOnce(search, sourceId, deps) {
   if (!src) return { newHits: [], error: null };
 
   const started = Date.now();
+  // Read seeding state before the (possibly slow) fetch: an edit during the fetch clears it.
+  const firstRun = !db.isSeeded(search.id, sourceId);
   let listings;
   try {
     listings = await withTimeout(src.search(search, ctx), SOURCE_TIMEOUT_MS, sourceId);
@@ -39,8 +42,12 @@ export async function runSourceOnce(search, sourceId, deps) {
     return { newHits: [], error: { source: sourceId, message: e.message } };
   }
 
+  // If the search was deleted, or its filters changed while we were fetching, these results
+  // belong to the old search: drop them so the next run re-seeds silently under the new filters.
+  const current = db.getSearch(search.id);
+  if (!current || MATCH_FIELDS.some(k => current[k] !== search[k])) return { newHits: [], error: null };
+
   // Seeded = one successful fetch has happened for this source since the search's filters last changed.
-  const firstRun = !db.isSeeded(search.id, sourceId);
   const matching = listings.filter(l => matches(l, search));
   const drops = db.priceDrops(search.id, matching, PRICE_DROP_FRACTION);
   const fresh = db.markSeen(search.id, matching);
@@ -116,14 +123,21 @@ export function startPoller(deps, {
 } = {}) {
   const { db, sources } = deps;
   const laneLocks = Object.fromEntries(Object.entries(lanes).map(([k, n]) => [k, semaphore(Math.max(1, n))]));
-  const nextDue = new Map(); // "searchId:sourceId" -> ms
   const running = new Map(); // "searchId:sourceId" -> promise
   let stopped = false;
   let lastPrune = -Infinity;
 
   const laneOf = (src) => laneLocks[src.lane] || laneLocks.fetch;
+  // Lets a source run part of its work in another lane, e.g. Vinted's browser fallback.
+  if (deps.ctx) {
+    deps.ctx.inLane = async (lane, fn) => {
+      const lock = laneLocks[lane] || laneLocks.fetch;
+      await lock.acquire();
+      try { return await fn(); } finally { lock.release(); }
+    };
+  }
 
-  function runJob(searchId, sourceId) {
+  function runJob(searchId, sourceId, { force = false } = {}) {
     const key = `${searchId}:${sourceId}`;
     if (running.has(key)) return running.get(key);
     const src = sources[sourceId];
@@ -133,7 +147,8 @@ export function startPoller(deps, {
       try {
         // Re-read so edits made while this job waited for its lane are respected.
         const s = db.getSearch(searchId);
-        if (!s || !s.sources.includes(sourceId)) return { newHits: [], error: null };
+        // Paused while queued: the timer skips it; "Check now" (force) still runs it.
+        if (!s || !s.sources.includes(sourceId) || (!force && !s.enabled)) return { newHits: [], error: null };
         const r = await runSourceOnce(s, sourceId, deps);
         if (r.newHits.length) log.info?.(`[${s.name}] ${sourceId}: ${r.newHits.length} new`);
         if (r.error) log.warn?.(`[${s.name}] ${sourceId}: ${r.error.message}`);
@@ -150,10 +165,13 @@ export function startPoller(deps, {
     return p;
   }
 
+  // Interval is recomputed every tick from the search's current setting, so a shorter
+  // "check every" takes effect straight away. Each run gets its own small random jitter.
+  const lastStart = new Map(); // key -> ms
+  const jitterOf = new Map(); // key -> factor for the current wait
   function intervalMs(search, src, context) {
     const min = typeof src.minIntervalSec === 'function' ? src.minIntervalSec(context) : (src.minIntervalSec || 0);
-    const base = Math.max(search.intervalSec || defaultIntervalSec, min) * 1000;
-    return base * (1 + Math.random() * jitter);
+    return Math.max(search.intervalSec || defaultIntervalSec, min) * 1000;
   }
 
   function tick() {
@@ -163,16 +181,23 @@ export function startPoller(deps, {
       const searches = db.listSearches().filter(s => s.enabled);
       const counts = {};
       for (const s of searches) for (const id of s.sources) counts[id] = (counts[id] || 0) + 1;
+      const active = new Set();
       for (const s of searches) {
         for (const sourceId of s.sources) {
           const src = sources[sourceId];
           if (!src) continue;
           const key = `${s.id}:${sourceId}`;
-          if (running.has(key) || now() < (nextDue.get(key) ?? -Infinity)) continue;
-          nextDue.set(key, now() + intervalMs(s, src, { searchCount: counts[sourceId], config: deps.ctx?.config }));
+          active.add(key);
+          if (running.has(key)) continue;
+          const wait = intervalMs(s, src, { searchCount: counts[sourceId], config: deps.ctx?.config }) * (jitterOf.get(key) ?? 1);
+          if (lastStart.has(key) && now() - lastStart.get(key) < wait) continue;
+          lastStart.set(key, now());
+          jitterOf.set(key, 1 + Math.random() * jitter);
           runJob(s.id, sourceId);
         }
       }
+      // Forget timers for deleted or paused searches.
+      for (const key of lastStart.keys()) if (!active.has(key)) { lastStart.delete(key); jitterOf.delete(key); }
     } catch (e) {
       log.error?.(`scheduler error: ${e.message}`);
     }
@@ -191,7 +216,7 @@ export function startPoller(deps, {
     async runNow(searchId) {
       const s = db.getSearch(searchId);
       if (!s) return null;
-      const results = await Promise.all(s.sources.filter(id => sources[id]).map(id => runJob(s.id, id)));
+      const results = await Promise.all(s.sources.filter(id => sources[id]).map(id => runJob(s.id, id, { force: true })));
       return {
         newHits: results.flatMap(r => r.newHits),
         errors: results.map(r => r.error).filter(Boolean),

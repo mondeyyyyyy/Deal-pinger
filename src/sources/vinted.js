@@ -57,23 +57,50 @@ async function viaFetch(s, ctx) {
   throw new Error('Vinted refused the session');
 }
 
-/** Fallback: let a real browser get past bot checks, then call the API from inside the page. */
+// When the plain API call is blocked, use the browser for a while instead of failing first every time.
+const BLOCKED_FOR_MS = 10 * 60 * 1000;
+let fetchBlockedUntil = 0;
+let browserWarm = false; // the warm browser context already holds Vinted's cookies
+
+export function _resetForTests() { cookies = null; fetchBlockedUntil = 0; browserWarm = false; }
+
+function timeout(p, ms, what) {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} timed out`)), ms); })])
+    .finally(() => clearTimeout(t));
+}
+
+/**
+ * Fallback: let a real browser get past bot checks, then call the API from inside the page.
+ * Runs in the browser lane so it shares the page limit with Facebook, Gumtree and Depop.
+ */
 async function viaBrowser(s, ctx) {
-  return withPage(ctx.config, async (page) => {
-    await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 45000 });
-    const json = await page.evaluate(async (url) => {
-      const r = await fetch(url, { headers: { accept: 'application/json' }, credentials: 'include' });
-      if (!r.ok) throw new Error('Vinted HTTP ' + r.status);
-      return r.json();
-    }, buildApiUrl(s));
-    return parse(json);
-  }, { key: id });
+  const open = ctx.withPage || withPage;
+  const inLane = ctx.inLane || ((_lane, fn) => fn());
+  return inLane('browser', () => open(ctx.config, async (page) => {
+    const call = (url) => page.evaluate(async (u) => {
+      const r = await fetch(u, { headers: { accept: 'application/json' }, credentials: 'include' });
+      return { status: r.status, body: r.ok ? await r.json() : null };
+    }, url);
+    // Once the context has Vinted's cookies, a tiny same-site page is enough to call the API from.
+    await page.goto(browserWarm ? BASE + '/robots.txt' : BASE + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    let r = await timeout(call(buildApiUrl(s)), 20000, 'Vinted');
+    if (r.status === 401 || r.status === 403) {
+      await page.goto(BASE + '/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      r = await timeout(call(buildApiUrl(s)), 20000, 'Vinted');
+    }
+    if (!r.body) { browserWarm = false; throw new Error(`Vinted HTTP ${r.status}`); }
+    browserWarm = true;
+    return parse(r.body);
+  }, { key: id }));
 }
 
 export async function search(s, ctx) {
+  if (Date.now() < fetchBlockedUntil) return viaBrowser(s, ctx);
   try {
     return await viaFetch(s, ctx);
   } catch (e) {
+    fetchBlockedUntil = Date.now() + BLOCKED_FOR_MS;
     try {
       return await viaBrowser(s, ctx);
     } catch (e2) {

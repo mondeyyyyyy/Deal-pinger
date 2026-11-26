@@ -2,7 +2,7 @@ import { inQuietHours, nowHHMM } from './match.js';
 
 const HOT_SCORE = 50; // profit at least half the asking price
 const SUMMARY_OVER = 3; // more alertable hits than this from one check → one summary alert
-const money = (n) => `£${n}`;
+const money = (n) => `£${Number.isInteger(Number(n)) ? Number(n) : Number(n).toFixed(2)}`;
 
 export function formatPush(search, hit, sourceLabel = (s) => s) {
   const l = hit.listing;
@@ -26,14 +26,24 @@ export function formatSummary(search, hits, sourceLabel = (s) => s) {
     title: `${hits.length} new deals · ${search.name}`,
     body: ranked.slice(0, 3).map(line).join(' · '),
     url: '/',
-    tag: `summary:${search.id ?? search.name}`,
+    tag: `summary:${search.id ?? search.name}:${Date.now()}:${hits[0]?.listing?.id ?? ''}`,
     items: ranked.map(h => ({ title: line(h), url: h.listing.url, source: sourceLabel(h.listing.source) })),
   };
 }
 
+// Discord markdown link text can't contain [ ] or a closing ) without breaking the link.
+const linkText = (s) => String(s).replace(/[[\]]/g, '').replace(/\)/g, '').slice(0, 120);
+
 function discordBody(p) {
   if (p.items) {
-    return { content: `**${p.title}**\n` + p.items.slice(0, 10).map(i => `• [${i.title}](${i.url}) · ${i.source}`).join('\n') };
+    // Embed descriptions allow 4,096 characters; stop adding lines before that.
+    let desc = '';
+    for (const i of p.items.slice(0, 15)) {
+      const line = `• [${linkText(i.title)}](${i.url}) · ${i.source}\n`;
+      if (desc.length + line.length > 4000) break;
+      desc += line;
+    }
+    return { embeds: [{ title: p.title.slice(0, 256), description: desc.trim() }] };
   }
   const embed = { title: p.title.slice(0, 256), description: p.body, url: p.url?.startsWith('http') ? p.url : undefined };
   if (p.image?.startsWith('http')) embed.thumbnail = { url: p.image };
@@ -45,7 +55,7 @@ function telegramText(p) {
   return [p.title, p.body, p.url?.startsWith('http') ? p.url : null].filter(Boolean).join('\n');
 }
 
-export function createNotifier({ db, config, webpush, now, sourceLabel, fetchFn = fetch }) {
+export function createNotifier({ db, config, webpush, now, sourceLabel, fetchFn = fetch, log = console }) {
   if (config.vapidPublicKey && config.vapidPrivateKey) {
     webpush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
   }
@@ -76,14 +86,20 @@ export function createNotifier({ db, config, webpush, now, sourceLabel, fetchFn 
   async function sendRaw(payload) {
     const s = db.getSettings();
     const jobs = [sendPush(payload)];
-    if (s.discordWebhook) jobs.push(post(s.discordWebhook, discordBody(payload)).then(r => (r.ok ? 1 : 0)));
+    if (s.discordWebhook) jobs.push(post(s.discordWebhook, discordBody(payload)).then(r => checked(r, 'Discord')));
     if (s.telegramBotToken && s.telegramChatId) {
       jobs.push(post(`https://api.telegram.org/bot${s.telegramBotToken}/sendMessage`, {
         chat_id: s.telegramChatId, text: telegramText(payload), disable_web_page_preview: false,
-      }).then(r => (r.ok ? 1 : 0)));
+      }).then(r => checked(r, 'Telegram')));
     }
     const results = await Promise.allSettled(jobs);
     return results.reduce((n, r) => n + (r.status === 'fulfilled' ? r.value : 0), 0);
+  }
+
+  function checked(r, name) {
+    if (r.ok) return 1;
+    log.warn?.(`${name} alert failed: HTTP ${r.status}`);
+    return 0;
   }
 
   const quiet = () => inQuietHours(db.getSettings(), clock());
@@ -110,9 +126,10 @@ export async function linkTelegram(db, fetchFn = fetch) {
   const res = await fetchFn(`https://api.telegram.org/bot${telegramBotToken}/getUpdates`, { signal: AbortSignal.timeout(10000) });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.ok) throw new Error('Telegram rejected the bot token');
-  const chats = (j.result || []).map(u => (u.message || u.edited_message || u.channel_post)?.chat?.id).filter(id => id != null);
-  if (!chats.length) throw new Error('Send /start to your bot in Telegram, then try again');
-  const chatId = String(chats.at(-1));
+  // Only trust a private chat that sent /start: the bot's name is public, so anyone could message it.
+  const starts = (j.result || []).map(u => u.message).filter(m => m?.chat?.type === 'private' && /^\/start\b/.test(m.text || ''));
+  if (!starts.length) throw new Error('Send /start to your bot in Telegram, then try again');
+  const chatId = String(starts.at(-1).chat.id);
   db.setSettings({ telegramChatId: chatId });
   return chatId;
 }

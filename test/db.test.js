@@ -149,3 +149,18 @@ test('alert channel settings', () => {
   db.setSettings({ discordWebhook: '' });
   assert.equal(db.getSettings().discordWebhook, null);
 });
+
+test('M6: one-time migration drops US marketplaces and re-seeds', () => {
+  const db = openDb(':memory:');
+  const a = db.addSearch({ name: 'a', keywords: 'a', sources: ['ebay', 'craigslist'] });
+  const b = db.addSearch({ name: 'b', keywords: 'b', sources: ['offerup', 'mercari'] });
+  db.markSeeded(a.id, 'ebay');
+  db.migrateSources(['ebay', 'facebook', 'vinted', 'gumtree', 'depop']);
+  assert.deepEqual(db.getSearch(a.id).sources, ['ebay']);
+  assert.equal(db.getSearch(a.id).enabled, true);
+  assert.equal(db.getSearch(b.id).enabled, false);
+  assert.equal(db.isSeeded(a.id, 'ebay'), false);
+  db.markSeeded(a.id, 'ebay');
+  db.migrateSources(['ebay']);
+  assert.equal(db.isSeeded(a.id, 'ebay'), true); // runs once only
+});

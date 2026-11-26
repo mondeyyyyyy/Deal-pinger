@@ -73,6 +73,12 @@ test('flips API: create from a hit, sell, summary, CSV', async () => {
   const csv = await (await req('/api/flips.csv')).text();
   assert.match(csv.split('\n')[0], /^Title,Marketplace,Bought £,Bought on,Sold £,Sold on,Fees £,Profit £/);
   assert.match(csv, /"Switch, Lite ""blue""",Vinted,65,/);
+  const loss = await (await req('/api/flips', { method: 'POST', body: { title: '=HYPERLINK("x")', boughtPrice: 50 } })).json();
+  await req(`/api/flips/${loss.id}`, { method: 'PUT', body: { soldPrice: 40 } });
+  const csv2 = await (await req('/api/flips.csv')).text();
+  assert.match(csv2, /\n"?'=HYPERLINK/); // formula neutralised
+  assert.match(csv2, /,50,[^,]*,40,[^,]*,0,-10,/); // a loss stays a number
+  await req(`/api/flips/${loss.id}`, { method: 'DELETE' });
   assert.equal((await req(`/api/flips/${f.id}`, { method: 'DELETE' })).status, 204);
 });
 
