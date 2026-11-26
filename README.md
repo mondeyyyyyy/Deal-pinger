@@ -46,7 +46,8 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Filters:** price range, postcode and radius, words to skip ("faulty, spares, box only"), and "only ping if profit is at least £X".
 - **Quiet hours** (UK time). Deals still collect in your feed.
 - **Marketplace status page**, so you can see when a site is working or blocked.
-- Save or hide deals, pause or **duplicate** searches, "Check now", dark mode, and a password lock.
+- Save or hide deals, pause or **duplicate** searches, "Check now", themes, and a password lock.
+- **Themes** (Settings → Appearance): Auto, Light, Dark, Pure black, Cream or Slate, with an accent colour of Orange, Ocean, Mint, Grape, Rose, Gold or Red. Saved per device.
 - **Real listing times** for Vinted and eBay with API keys ("listed 40s ago"); other sites show when Deal Pinger found the listing.
 - New and edited searches don't flood you: listings already up are skipped, and only ones posted afterwards ping you.
 - Old data is cleaned up automatically, so it stays quick after months of running.

@@ -946,6 +946,42 @@ $('#dcSetup').addEventListener('click', () => {
   $('#dcRemove').addEventListener('click', async () => { renderChannels(await api('/api/settings', { method: 'PUT', body: { discordWebhook: '' } })); closeSheet(); });
 });
 
+/* ---------- themes ---------- */
+const MODES = [
+  ['auto', 'Auto', 'linear-gradient(135deg, #f4f5f8 50%, #0b0d12 50%)'],
+  ['light', 'Light', '#f4f5f8'], ['dark', 'Dark', '#0b0d12'], ['black', 'Pure black', '#000'],
+  ['cream', 'Cream', '#f5efe4'], ['slate', 'Slate', '#1e293b'],
+];
+const ACCENTS = [
+  ['orange', 'Orange', '#ff5a1f'], ['ocean', 'Ocean', '#1f7aec'], ['mint', 'Mint', '#0f9e7b'], ['grape', 'Grape', '#7c4dff'],
+  ['rose', 'Rose', '#e8457a'], ['gold', 'Gold', '#e0a100'], ['red', 'Red', '#e53935'],
+];
+function loadTheme() {
+  try { return { mode: 'auto', accent: 'orange', ...JSON.parse(localStorage.getItem('dp-theme') || '{}') }; } catch { return { mode: 'auto', accent: 'orange' }; }
+}
+function applyTheme(t) {
+  const root = document.documentElement;
+  if (t.mode === 'auto') delete root.dataset.mode; else root.dataset.mode = t.mode;
+  if (t.accent === 'orange') delete root.dataset.accent; else root.dataset.accent = t.accent;
+  // The phone's status bar follows the page background (Auto goes back to the light/dark defaults).
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+  $$('meta[name="theme-color"]').forEach((m) => {
+    if (!m.dataset.default) m.dataset.default = m.getAttribute('content');
+    m.setAttribute('content', t.mode === 'auto' ? m.dataset.default : bg);
+  });
+  try { localStorage.setItem('dp-theme', JSON.stringify(t)); } catch {}
+  renderThemePicker(t);
+}
+function renderThemePicker(t = loadTheme()) {
+  const sw = (list, key, cur) => list.map(([id, label, color]) =>
+    `<button class="swatch ${id === cur ? 'on' : ''}" data-${key}="${id}" aria-pressed="${id === cur}"><i style="background:${color}"></i>${label}</button>`).join('');
+  $('#themeModes').innerHTML = sw(MODES, 'mode', t.mode);
+  $('#themeAccents').innerHTML = sw(ACCENTS, 'accent', t.accent);
+}
+$('#themeModes').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) applyTheme({ ...loadTheme(), mode: b.dataset.mode }); });
+$('#themeAccents').addEventListener('click', (e) => { const b = e.target.closest('[data-accent]'); if (b) applyTheme({ ...loadTheme(), accent: b.dataset.accent }); });
+applyTheme(loadTheme());
+
 /* ---------- boot ---------- */
 async function start() {
   try {

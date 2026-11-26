@@ -1,4 +1,4 @@
-const SHELL = 'deal-pinger-shell-v14';
+const SHELL = 'deal-pinger-shell-v15';
 const ASSETS = ['/', '/index.html', '/app.js', '/messages.js', '/tools.js', '/manifest.webmanifest', '/icon-192.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
