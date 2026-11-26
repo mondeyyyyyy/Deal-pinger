@@ -1,0 +1,41 @@
+import { inQuietHours, nowHHMM } from './match.js';
+
+export function formatPush(search, hit, sourceLabel = (s) => s) {
+  const l = hit.listing;
+  const price = l.price == null ? '?' : `$${l.price}`;
+  const parts = [sourceLabel(l.source), search.name];
+  if (hit.estimate) {
+    const p = hit.estimate.profit;
+    parts.push(`${p >= 0 ? '+' : '-'}$${Math.abs(p)} profit (resells ~$${hit.estimate.value})`);
+  }
+  if (l.location) parts.push(l.location);
+  return { title: `${price} · ${l.title}`, body: parts.join(' · '), url: l.url, image: l.image, hitId: hit.id, tag: `${l.source}:${l.id}` };
+}
+
+export function createNotifier({ db, config, webpush, now, sourceLabel }) {
+  if (config.vapidPublicKey && config.vapidPrivateKey) {
+    webpush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
+  }
+  const clock = now || (() => nowHHMM(config.timezone));
+
+  async function sendRaw(payload) {
+    if (!config.vapidPublicKey) return 0;
+    let sent = 0;
+    for (const sub of db.listSubscriptions()) {
+      try {
+        await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: 'high' });
+        sent++;
+      } catch (e) {
+        if (e.statusCode === 404 || e.statusCode === 410) db.removeSubscription(sub.endpoint);
+      }
+    }
+    return sent;
+  }
+
+  async function notify(search, hit, { force = false } = {}) {
+    if (!force && inQuietHours(db.getSettings(), clock())) return 0;
+    return sendRaw(formatPush(search, hit, sourceLabel));
+  }
+  notify.sendRaw = sendRaw;
+  return notify;
+}
