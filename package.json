@@ -1,0 +1,12 @@
+{
+  "name": "deal-pinger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test --no-warnings test/*.test.js",
+    "vapid": "node scripts/gen-vapid.js"
+  }
+}
