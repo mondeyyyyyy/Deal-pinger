@@ -188,6 +188,14 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
           <button class="btn sm" id="dcSetup">Set up</button></div>
       </div>
       <div class="sub" style="white-space:normal;margin:8px 4px 0">Optional extra alerts. Telegram is often the fastest and most reliable way to get pinged.</div>
+      <div class="section-title">Buying</div>
+      <div class="card" style="padding:14px">
+        <label class="f" style="margin:0"><span>Tapping an alert opens</span><select class="t" id="tapOpens">
+          <option value="listing">The listing</option>
+          <option value="buy">Checkout straight away (Vinted, eBay Buy It Now)</option>
+        </select></label>
+        <div class="sub" style="margin-top:8px;white-space:normal">Checkout is never used for listings the scam filter is unsure about.</div>
+      </div>
       <div class="section-title">Scam filter</div>
       <div class="card" style="padding:14px">
         <select class="t" id="scamFilter">
@@ -197,10 +205,10 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
         </select>
         <div class="sub" style="margin-top:8px;white-space:normal">Catches listings far below their usual price (eBay sold or CeX), sellers with no ratings or brand-new accounts, and requests like bank transfer, PayPal friends &amp; family or WhatsApp. Hidden ones never ping you; review them under ⚠️ Flagged.</div>
       </div>
-      <div class="section-title">Evening summary</div>
+      <div class="section-title">Profit</div>
       <div class="card" style="padding:14px">
-        <label class="f" style="margin:0"><span>Send me a daily summary at</span><input class="t" type="time" id="digestTime"></label>
-        <div class="sub" style="margin-top:8px;white-space:normal">Deals found in the last 24 hours, the best one, scams hidden and your flip profit. Leave empty for no summary.</div>
+        <label class="f" style="margin:0"><span>Selling fee (%)</span><input class="t" id="feePct" inputmode="decimal" placeholder="0"></label>
+        <div class="sub" style="margin-top:8px;white-space:normal">Taken off the resale value in profit estimates. 0% for eBay UK private sellers and Vinted; around 13% if you sell on eBay as a business.</div>
       </div>
       <div class="section-title">Quiet hours</div>
       <div class="card" style="padding:14px">
@@ -210,21 +218,13 @@ svg.chart { width: 100%; height: auto; display: block; margin-top: 8px; }
         </div>
         <div class="sub" style="margin-top:8px;white-space:normal">No alerts during these hours. Deals still show up in your feed. Leave empty to always alert.</div>
       </div>
-      <div class="section-title">Profit</div>
+      <div class="section-title">Evening summary</div>
       <div class="card" style="padding:14px">
-        <label class="f" style="margin:0"><span>Selling fee (%)</span><input class="t" id="feePct" inputmode="decimal" placeholder="0"></label>
-        <div class="sub" style="margin-top:8px;white-space:normal">Taken off the resale value in profit estimates. 0% for eBay UK private sellers and Vinted; around 13% if you sell on eBay as a business.</div>
+        <label class="f" style="margin:0"><span>Send me a daily summary at</span><input class="t" type="time" id="digestTime"></label>
+        <div class="sub" style="margin-top:8px;white-space:normal">Deals found in the last 24 hours, the best one, scams hidden and your flip profit. Leave empty for no summary.</div>
       </div>
       <div class="section-title">Marketplaces</div>
       <div class="card" id="status"></div>
-      <div class="section-title">Buying</div>
-      <div class="card" style="padding:14px">
-        <label class="f" style="margin:0"><span>Tapping an alert opens</span><select class="t" id="tapOpens">
-          <option value="listing">The listing</option>
-          <option value="buy">Checkout straight away (Vinted, eBay Buy It Now)</option>
-        </select></label>
-        <div class="sub" style="margin-top:8px;white-space:normal">Checkout is never used for listings the scam filter is unsure about.</div>
-      </div>
       <div class="section-title">Backup</div>
       <div class="card">
         <div class="row"><div class="grow"><div class="sname">Download a backup</div><div class="sub" style="white-space:normal">Searches, settings and flips (no passwords or tokens)</div></div>

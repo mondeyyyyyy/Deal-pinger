@@ -533,7 +533,7 @@ async function loadSettings() {
       : `Failing: ${s.error} · ${ago(s.at)}`;
     const extra = s.id === 'ebay' ? (status.ebayApi ? ' · official API' : ' · no API keys, reading the website') : '';
     return `<div class="row"><span class="dot ${cls}"></span><div class="grow"><div class="sname">${esc(s.label)}</div><div class="sub" style="white-space:normal">${esc(sub + extra)}</div></div></div>`;
-  }).join('') + `<div class="row"><div class="grow sub" style="white-space:normal">Each search checks on its own timer (set it when editing a search) · ${status.subscriptions} iPhone(s) getting alerts</div></div>`;
+  }).join('') + `<div class="row"><div class="grow sub" style="white-space:normal">Each search checks on its own timer (set it when editing a search) · ${status.subscriptions === 1 ? "1 iPhone" : status.subscriptions + " iPhones"} getting alerts</div></div>`;
 }
 
 
