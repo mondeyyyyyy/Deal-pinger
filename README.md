@@ -28,6 +28,8 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Copy listing text** on any unsold flip: a cleaned-up title (no "collection only!!" etc.) and a simple description to paste into eBay or Vinted.
 - **Telegram alerts with the photo**, plus price, profit, seller, scam check, Buy now/Open/CeX buttons and a ready-to-copy message.
 - **Only ping fresh listings** (per search): skip pings for listings posted more than 15 minutes / 1 hour / 6 hours / 1 day ago. Uses the real listing time on Vinted and eBay (with API keys); other sites always ping.
+- **Deal details:** tap a deal's title for the big photo, full description, a line-by-line profit breakdown (price, Vinted fee, postage, selling fee, resale value, CeX cash and voucher) and an editable seller message to copy. Tapping the photo opens the listing.
+- **📦 Bundle badge** on bundles and job lots ("with 5 games", "+ 2 controllers", "x3"), which often hide extra profit.
 - **Undo** after hiding a deal, and deals grouped by **Today / Yesterday / date**.
 - **Pause all / resume all** searches in one tap (Searches tab), e.g. when you're on holiday. Resume brings back exactly the ones that were running.
 - **No buyer posts or swaps.** "WANTED", "WTB", "Looking for…" and swap-only listings are skipped automatically.

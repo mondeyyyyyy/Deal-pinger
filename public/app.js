@@ -121,6 +121,61 @@ async function loadDeals(manual) {
   if (manual) toast('Up to date');
 }
 
+// Bundles and job lots often hide extra profit (games, controllers, accessories).
+const BUNDLE = /\bbundle\b|\bjob ?lot\b|\bjoblot\b|\b\d+\s?x\b|\bx\s?\d+\b|\bwith \d+ (games|controllers|pads)\b|\+ ?\d+ (games|controllers|pads)\b/i;
+
+let settingsCache = null;
+async function getSettings() {
+  if (!settingsCache) settingsCache = await api('/api/settings').catch(() => ({}));
+  return settingsCache;
+}
+
+/** Full details for one deal: photo, description, profit breakdown, editable seller message. */
+async function openDealSheet(hit) {
+  const l = hit.listing;
+  const e = hit.estimate;
+  const s = searches.find((x) => x.id === hit.searchId);
+  const st = await getSettings();
+  const row = (k, v, cls = '') => `<div class="mini"><span>${k}</span><b class="${cls}">${v}</b></div>`;
+  const cost = (l.price ?? 0) + (l.extraCost || 0);
+  let breakdown = row('Asking price', money(l.price));
+  if (l.extraCost) breakdown += row('Vinted buyer protection fee', '+' + money(l.extraCost));
+  if (e?.value != null && e?.profit != null) {
+    const fee = Math.round(e.value * (st.feePct || 0)) / 100;
+    breakdown += `<div class="sname" style="margin-top:10px">Resell on eBay</div>`
+      + row(`Usual sold price${e.comps ? ` (${e.comps} sales)` : s?.resaleOverride != null ? ' (your figure)' : ''}`, money(e.value))
+      + (fee ? row(`Selling fee (${st.feePct}%)`, '−' + money(fee)) : '')
+      + row('Postage', '−' + money(s?.shipEstimate ?? 4))
+      + row('Your cost', '−' + money(Math.round(cost * 100) / 100))
+      + row('Profit', `${e.profit >= 0 ? '+' : '−'}${money(Math.abs(e.profit))}`, e.profit >= 0 ? 'up' : 'down');
+  }
+  if (e?.cex) {
+    breakdown += `<div class="sname" style="margin-top:10px">Sell to CeX${e.cex.name ? ` <span class="sub">(${esc(e.cex.name)})</span>` : ''}</div>`
+      + row('Cash', `${money(e.cex.cash)} → ${e.cex.cashProfit >= 0 ? '+' : '−'}${money(Math.abs(e.cex.cashProfit))}`, e.cex.cashProfit >= 0 ? 'up' : 'down')
+      + (e.cex.voucher != null ? row('Voucher', `${money(e.cex.voucher)} → ${e.cex.voucherProfit >= 0 ? '+' : '−'}${money(Math.abs(e.cex.voucherProfit))}`, e.cex.voucherProfit >= 0 ? 'up' : 'down') : '');
+  }
+  if (!e) breakdown += '<div class="sub" style="margin-top:8px;white-space:normal">No resale price known yet for this search. Set "I can resell these for" on the search, or pin a CeX item.</div>';
+  const img = l.image && safeUrl(l.image) !== '#';
+  openSheet(`
+    <h2>${money(l.price)} <button class="icon-btn" data-close aria-label="Close">✕</button></h2>
+    ${img ? `<div class="bigphoto" data-img="${esc(l.image)}"></div>` : ''}
+    <div class="sname" style="font-size:17px;margin:8px 0 4px">${esc(l.title)}</div>
+    <div class="sub" style="white-space:normal">${esc([srcLabel(l.source), l.location, l.seller ? [l.seller.name, l.seller.ratings != null ? `${l.seller.ratings} ratings` : null].filter(Boolean).join(' · ') : null].filter(Boolean).join(' · '))}</div>
+    ${l.scam && l.scam.risk !== 'low' ? `<div class="warn" style="margin-top:6px">⚠️ ${esc(l.scam.reasons.join(' · '))}</div>` : ''}
+    ${l.description ? `<p class="fulldesc">${esc(l.description)}</p>` : ''}
+    <div class="card" style="padding:14px;margin-top:12px">${breakdown}</div>
+    <label class="f" style="margin-top:12px"><span>Message to the seller</span><textarea class="t" id="dealMsg" rows="3">${esc(messageFor(hit))}</textarea></label>
+    <div style="display:flex;gap:8px">
+      ${l.buyUrl && safeUrl(l.buyUrl) !== '#' && l.scam?.risk !== 'high' ? `<a class="btn primary" style="flex:1" href="${esc(safeUrl(l.buyUrl))}" target="_blank" rel="noopener">Buy now</a>` : ''}
+      <a class="btn ${l.buyUrl ? '' : 'primary'}" style="flex:1" id="sheetMsg" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener">Copy message &amp; open</a>
+    </div>`);
+  const ph = $('#sheetBody .bigphoto');
+  if (ph) ph.style.backgroundImage = `url(${JSON.stringify(ph.dataset.img)})`;
+  $('#sheetMsg').addEventListener('click', () => {
+    navigator.clipboard?.writeText($('#dealMsg').value).then(() => toast('Message copied. Paste it to the seller.'), () => {});
+  });
+}
+
 function soldUrl(hit) {
   const s = searches.find((x) => x.id === hit.searchId);
   const q = (s?.keywords || hit.listing.title).split('|')[0].trim();
@@ -188,16 +243,17 @@ function renderDeals() {
     const buy = l.buyUrl && safeUrl(l.buyUrl) !== '#' && l.scam?.risk !== 'high';
     const img = l.image && safeUrl(l.image) !== '#' ? `data-img="${esc(l.image)}"` : '';
     const hot = e && e.score >= 50 ? '<span class="hot">🔥 Hot</span>' : '';
+    const bundle = BUNDLE.test(l.title) ? '<span class="bundle">📦 Bundle</span>' : '';
     const when = l.postedAt ? `listed ${ago(l.postedAt)}` : `found ${ago(h.createdAt)}`;
     return `${heading}<article class="card" data-id="${h.id}">
       <div class="deal">
         <a class="thumb" ${img} href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" aria-label="Open listing">${l.image ? '' : 'No photo'}</a>
         <div style="min-width:0">
-          <a class="dealhead" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener">
+          <a class="dealhead" href="#" data-act="details">
             <div class="price">${money(l.price)}${l.previousPrice != null ? `<span class="was">${money(l.previousPrice)}</span>` : ''}</div>
             <div class="title">${esc(l.title)}</div>
           </a>
-          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${scam || hot}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}${cexChip}</div>
+          <div class="meta"><span class="badge b-${esc(l.source)}">${esc(srcLabel(l.source))}</span>${scam || hot}${bundle}${l.previousPrice != null ? '<span class="drop">Price drop</span>' : ''}${profit}${cexChip}</div>
           <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}${l.sellerId || l.sellerName || l.seller?.name ? ' · <button class="linkbtn" data-act="block">Block seller</button>' : ''}</div>
           ${valueLine ? `<div class="meta">${esc(valueLine)}</div>` : ''}
           <div class="meta"><a class="linkish" data-act="sold" href="${esc(soldUrl(h))}" target="_blank" rel="noopener">Check eBay sold prices ↗</a></div>
@@ -240,6 +296,7 @@ $('#deals').addEventListener('click', async (e) => {
     return;
   }
   e.preventDefault();
+  if (act === 'details') { openDealSheet(hit); return; }
   if (act === 'block') {
     const who = hit.listing.sellerName || hit.listing.seller?.name || 'this seller';
     if (!confirm(`Block ${who}? You won't see their listings again. (Undo in Settings.)`)) return;
@@ -614,6 +671,7 @@ $('#quietEnd').addEventListener('change', saveQuiet);
 $('#logout').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); showLogin(); });
 
 async function loadSettings() {
+  settingsCache = null;
   refreshPushUi();
   const [settings, status] = await Promise.all([api('/api/settings'), api('/api/status')]);
   $('#quietStart').value = settings.quietStart || '';
