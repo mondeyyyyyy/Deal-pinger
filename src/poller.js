@@ -106,6 +106,8 @@ export async function runSourceOnce(search, sourceId, deps) {
   // When the price decides whether a deal is hidden (scam filter) or sent (profit minimum),
   // a slow lookup is worth waiting a little longer for. Usually it's pre-loaded and instant.
   if (prices === null && (scamFilter === 'hide' || search.minProfit != null)) prices = await capped(soldP, EXTRA_WAIT_MS);
+  // Likewise for CeX prices when this search only wants deals that make money at CeX.
+  if (cex === null && search.cexFilter) cex = await capped(cexP, EXTRA_WAIT_MS);
   const newHits = [];
   const toAlert = [];
   const ests = alerts.map((listing) => buildEstimate(search, listing, { prices, cex, feePct }));
@@ -136,7 +138,13 @@ export async function runSourceOnce(search, sourceId, deps) {
     // Unknown profit isn't "below the minimum": alert rather than lose the deal for good.
     // (An automatic CeX match alone isn't trusted for this: it can be the wrong model.)
     const profitKnown = est && (prices !== null || search.resaleOverride != null || est.cex?.pinned);
-    const worthIt = search.minProfit == null || !profitKnown || est.bestProfit >= search.minProfit;
+    let worthIt = search.minProfit == null || !profitKnown || est.bestProfit >= search.minProfit;
+    // "Only ping if I'd profit selling it to CeX": cash or voucher, above an optional minimum.
+    // If CeX's price isn't known, it still pings (never silently lost).
+    if (worthIt && search.cexFilter && est?.cex) {
+      const cexProfit = search.cexFilter === 'voucher' ? est.cex.voucherProfit : est.cex.cashProfit;
+      worthIt = cexProfit != null && (search.cexMinProfit != null ? cexProfit >= search.cexMinProfit : cexProfit > 0);
+    }
     // Another of your searches already sent this exact listing: keep the card, skip the second ping.
     if (worthIt && !hidden && !db.alertedElsewhere(search.id, listing)) toAlert.push(hit);
   }

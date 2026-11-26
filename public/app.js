@@ -132,12 +132,15 @@ function renderDeals() {
   if (dealFilter === 'saved') list = list.filter((h) => h.status === 'saved');
   if (dealFilter === 'profit') list = list.filter((h) => bestOf(h) > 0).sort((a, b) => bestOf(b) - bestOf(a));
   if (dealFilter === 'drops') list = list.filter((h) => h.listing.previousPrice != null);
+  if (dealFilter === 'cex') list = list.filter((h) => h.estimate?.cex?.cashProfit > 0 || h.estimate?.cex?.voucherProfit > 0)
+    .sort((a, b) => Math.max(b.estimate.cex.cashProfit, b.estimate.cex.voucherProfit ?? -Infinity) - Math.max(a.estimate.cex.cashProfit, a.estimate.cex.voucherProfit ?? -Infinity));
   if (dealFilter === 'flagged') list = hits.filter((h) => h.status === 'flagged');
   const el = $('#deals');
   if (!list.length) {
     const EMPTY = {
       saved: ['Nothing saved', 'Tap ☆ on a deal to keep it here.'],
       profit: ['No profitable deals yet', 'Deals with an estimated profit show here, best first.'],
+      cex: ['No CeX flips yet', 'Deals you could sell to CeX for more than you\'d pay show here, best first.'],
       drops: ['No price drops yet', 'When a listing you\'ve seen gets 5% or more cheaper, it shows here.'],
       flagged: ['No likely scams', 'Listings the scam filter hides show here, so you can double-check them.'],
       all: ['No deals yet', 'New matches will show up here, and you\'ll get a ping the moment they\'re posted.'],
@@ -158,7 +161,7 @@ function renderDeals() {
     const scam = l.scam && l.scam.risk !== 'low'
       ? `<span class="scam ${esc(l.scam.risk)}">⚠️ ${l.scam.risk === 'high' ? 'Likely scam' : 'Check seller'}</span>` : '';
     const seller = l.seller ? [l.seller.name, l.seller.ratings != null ? `${l.seller.ratings} ratings` : null].filter(Boolean).join(' · ') : '';
-    const valueLine = [e?.value != null ? `resells ~${money(e.value)}` : null, e?.cex ? `CeX sells ${money(e.cex.sell)}, pays ${money(e.cex.cash)} cash / ${money(e.cex.voucher)} voucher` : null].filter(Boolean).join(' · ');
+    const valueLine = [e?.value != null ? `resells ~${money(e.value)}` : null, e?.cex ? `CeX${e.cex.name ? ` (${e.cex.name})` : ''} sells ${money(e.cex.sell)}, pays ${money(e.cex.cash)} cash / ${money(e.cex.voucher)} voucher` : null].filter(Boolean).join(' · ');
     const buy = l.buyUrl && safeUrl(l.buyUrl) !== '#' && l.scam?.risk !== 'high';
     const img = l.image && safeUrl(l.image) !== '#' ? `data-img="${esc(l.image)}"` : '';
     const hot = e && e.score >= 50 ? '<span class="hot">🔥 Hot</span>' : '';
@@ -364,6 +367,15 @@ function openSearchForm(existing = null, { copy = false } = {}) {
         <div style="display:flex;gap:8px"><button type="button" class="btn sm" id="cexFind">Pick CeX item</button><button type="button" class="btn sm" id="cexAuto">Auto</button><button type="button" class="btn sm" id="cexOff">Off</button></div>
         <div class="card cexlist" id="cexResults" style="margin-top:8px"></div>
       </div>
+      <div>
+        <label class="f"><span>Only ping if selling to CeX makes a profit</span><select class="t" name="cexFilter">
+          <option value="" ${!src?.cexFilter ? 'selected' : ''}>No, ping every deal</option>
+          <option value="cash" ${src?.cexFilter === 'cash' ? 'selected' : ''}>Yes, for CeX cash</option>
+          <option value="voucher" ${src?.cexFilter === 'voucher' ? 'selected' : ''}>Yes, for CeX voucher</option>
+        </select></label>
+        <label class="f"><span>CeX profit at least (£)</span><input class="t" name="cexMinProfit" inputmode="decimal" value="${v('cexMinProfit')}" placeholder="Any profit"></label>
+      </div>
+      <span class="hint" style="margin:-8px 0 14px">Uses what CeX pays in store. If you'll post it to CeX, set the minimum to cover postage. Pin the exact CeX item above for the most accurate prices.</span>
       <label class="f"><span>Seller message</span><textarea class="t" name="messageTemplate" rows="2">${v('messageTemplate', DEFAULT_TEMPLATE)}</textarea>
         <span class="hint">{offer} = about 85% of the price. {collect} becomes "I can collect today." only on Facebook/Gumtree or when the listing mentions collection; otherwise anything about collecting is left out.</span></label>
       <label class="f"><span>Send this search to its own Discord channel (optional)</span><input class="t" name="discordWebhook" placeholder="${s?.hasDiscordWebhook ? 'Own channel set. Paste a new link to change it.' : 'https://discord.com/api/webhooks/…'}" autocomplete="off">

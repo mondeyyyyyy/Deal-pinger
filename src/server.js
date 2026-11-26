@@ -29,6 +29,7 @@ const FIELD_ERRORS = {
   minProfit: 'Minimum profit must be a number of pounds',
   shipEstimate: 'Postage cost must be a number of pounds',
   resaleOverride: 'Resale price must be a number of pounds',
+  cexMinProfit: 'CeX minimum profit must be a number of pounds',
   radius: 'Radius must be a number of miles',
   boughtPrice: 'What you paid must be a number of pounds',
   soldPrice: 'Sold price must be a number of pounds',
@@ -49,7 +50,7 @@ function cleanSearch(body, { partial }) {
     if (body.sources.some(s => !SOURCE_IDS.includes(s))) return err('Unknown marketplace');
     out.sources = [...new Set(body.sources)];
   }
-  for (const k of ['minPrice', 'maxPrice', 'minProfit', 'shipEstimate', 'radius', 'resaleOverride']) {
+  for (const k of ['minPrice', 'maxPrice', 'minProfit', 'shipEstimate', 'radius', 'resaleOverride', 'cexMinProfit']) {
     if (body[k] === undefined) continue;
     const v = num(body[k]);
     if (Number.isNaN(v) || (v != null && v < 0)) return err(FIELD_ERRORS[k]);
@@ -63,6 +64,11 @@ function cleanSearch(body, { partial }) {
     if (v == null || Number.isNaN(v) || v < 15 || v > 3600) return err('Check every must be between 15 seconds and 1 hour');
     out.intervalSec = Math.round(v);
   }
+  if (body.cexFilter !== undefined) {
+    const v = body.cexFilter || null;
+    if (v && !['cash', 'voucher'].includes(v)) return err('CeX filter must be cash or voucher');
+    out.cexFilter = v;
+  }
   if (body.cexMode !== undefined) {
     if (!CEX_MODES.includes(body.cexMode)) return err('Unknown CeX setting');
     out.cexMode = body.cexMode;
@@ -73,6 +79,7 @@ function cleanSearch(body, { partial }) {
     if (v && !DISCORD_HOOK.test(v)) return err('That isn\'t a Discord webhook link');
     out.discordWebhook = v || null;
   }
+  if ((out.cexFilter ?? body.cexFilter) && (out.cexMode ?? body.cexMode) === 'off') return err("Turn CeX prices on to filter by CeX profit");
   return [out, null];
 }
 
