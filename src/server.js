@@ -47,11 +47,23 @@ export function createApp({ db, config, runNow, notify, health }) {
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
+  const failures = new Map(); // ip -> { count, resetAt }
+  const MAX_FAILURES = 10;
+  const WINDOW_MS = 15 * 60 * 1000;
+
   app.post('/api/login', async (req, res) => {
+    const ip = req.ip;
+    if (failures.get(ip)?.resetAt < Date.now()) failures.delete(ip);
+    if ((failures.get(ip)?.count || 0) >= MAX_FAILURES) {
+      return res.status(429).json({ error: 'Too many wrong passwords. Try again in 15 minutes.' });
+    }
     const given = Buffer.from(String(req.body?.password || ''));
     const want = Buffer.from(config.appPassword || '');
     const ok = want.length > 0 && given.length === want.length && crypto.timingSafeEqual(given, want);
     if (!ok) {
+      const cur = failures.get(ip) || { count: 0, resetAt: Date.now() + WINDOW_MS };
+      cur.count++;
+      failures.set(ip, cur);
       await new Promise(r => setTimeout(r, 400));
       return res.status(401).json({ error: 'Wrong password' });
     }

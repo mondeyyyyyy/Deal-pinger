@@ -90,3 +90,9 @@ test('settings, vapid, subscribe, test push', async () => {
   assert.equal(tp.sent, 1);
   assert.equal(pushes.length, 1);
 });
+
+test('login is rate limited after repeated failures', async () => {
+  let last;
+  for (let i = 0; i < 12; i++) last = await req('/api/login', { method: 'POST', body: { password: 'bad' + i } });
+  assert.equal(last.status, 429);
+});

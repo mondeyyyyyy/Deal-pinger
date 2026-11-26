@@ -114,7 +114,7 @@ function renderDeals() {
     const l = h.listing;
     const e = h.estimate;
     const profit = e ? `<span class="profit ${e.profit >= 0 ? 'up' : 'down'}">${e.profit >= 0 ? '+' : '−'}${money(Math.abs(e.profit))} profit</span>` : '';
-    const img = l.image ? `style="background-image:url('${esc(safeUrl(l.image))}')"` : '';
+    const img = l.image && safeUrl(l.image) !== '#' ? `data-img="${esc(l.image)}"` : '';
     return `<article class="card" data-id="${h.id}">
       <a class="deal" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none">
         <div class="thumb" ${img}>${l.image ? '' : 'No photo'}</div>
@@ -132,6 +132,8 @@ function renderDeals() {
       </div>
     </article>`;
   }).join('');
+  // Set images through the style API so a hostile URL can't inject CSS.
+  $$('.thumb[data-img]', el).forEach((t) => { t.style.backgroundImage = `url(${JSON.stringify(t.dataset.img)})`; });
 }
 
 $('#deals').addEventListener('click', async (e) => {
@@ -255,6 +257,8 @@ function openSearchForm(s = null) {
     try {
       const r = await api(`/api/searches/${s.id}/run`, { method: 'POST' });
       toast(r.errors.length ? `${r.newHits} new · ${r.errors.map((x) => srcLabel(x.source)).join(', ')} failed` : `${r.newHits} new deal${r.newHits === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast(err.message);
     } finally { e.target.textContent = 'Check now'; e.target.disabled = false; }
   });
   $('#showHistory').addEventListener('click', () => showHistory(s));
@@ -298,6 +302,25 @@ async function pushState() {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   return sub && Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'denied' : 'off';
+}
+
+// Make sure the server still knows this device: it may have dropped the subscription,
+// or the server's push keys may have changed (e.g. the Railway volume was replaced).
+async function resyncPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission !== 'granted') return;
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) return;
+  const { publicKey } = await api('/api/vapid');
+  if (!publicKey) return;
+  const want = urlB64ToUint8Array(publicKey);
+  const have = sub.options?.applicationServerKey ? new Uint8Array(sub.options.applicationServerKey) : null;
+  const same = have && have.length === want.length && have.every((b, i) => b === want[i]);
+  if (!same) {
+    await sub.unsubscribe();
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: want });
+  }
+  await api('/api/subscribe', { method: 'POST', body: sub.toJSON() });
 }
 
 async function refreshPushUi() {
@@ -369,7 +392,7 @@ async function start() {
   $('#app').classList.remove('hidden');
   searches = await api('/api/searches');
   setTab('deals');
-  refreshPushUi();
+  resyncPush().catch(() => {}).finally(refreshPushUi);
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');

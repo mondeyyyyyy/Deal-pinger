@@ -137,3 +137,69 @@ test('ensureVapid generates keys once and reuses them', async () => {
   ensureVapid(db, c3, webpush);
   assert.equal(c3.vapidPublicKey, 'envpub');
 });
+
+test('first match on a search whose first poll was empty still alerts', async () => {
+  const { search, feeds, sent, deps } = setup();
+  feeds.a = []; feeds.b = [];
+  await runSearchOnce(search, deps);
+  feeds.a = [L('a', '10')];
+  const r = await runSearchOnce(search, deps);
+  assert.equal(r.newHits.length, 1);
+  assert.equal(sent.length, 1);
+});
+
+test('a failed first fetch does not count as seeding', async () => {
+  const { search, feeds, sent, deps } = setup();
+  feeds.b = 'boom';
+  await runSearchOnce(search, deps);
+  feeds.b = [L('b', '1'), L('b', '2')];
+  await runSearchOnce(search, deps);
+  assert.equal(sent.length, 0);
+});
+
+test('editing keywords re-seeds silently instead of bursting', async () => {
+  const { db, search, feeds, sent, deps } = setup();
+  await runSearchOnce(search, deps);
+  feeds.a = [L('a', '1'), ...Array.from({ length: 20 }, (_, i) => L('a', 'x' + i, 50, 'xbox series'))];
+  feeds.b = [L('b', '1')];
+  await runSearchOnce(search, deps);
+  assert.equal(sent.length, 0);
+  const s2 = db.updateSearch(search.id, { keywords: 'xbox' });
+  await runSearchOnce(s2, deps);
+  assert.equal(sent.length, 0);
+  feeds.a.push(L('a', 'new', 50, 'xbox one'));
+  await runSearchOnce(s2, deps);
+  assert.equal(sent.length, 1);
+});
+
+test('renaming or pausing a search keeps seeding', async () => {
+  const { db, search, feeds, sent, deps } = setup();
+  await runSearchOnce(search, deps);
+  const s2 = db.updateSearch(search.id, { name: 'renamed', enabled: true });
+  feeds.a = [L('a', '1'), L('a', '2')];
+  await runSearchOnce(s2, deps);
+  assert.equal(sent.length, 1);
+});
+
+test('poller runs searches one at a time even when runNow overlaps', async () => {
+  const { startPoller } = await import('../src/poller.js');
+  const { db, search, deps } = setup();
+  let active = 0, maxActive = 0;
+  deps.sources.a.search = async () => { active++; maxActive = Math.max(maxActive, active); await new Promise(r => setTimeout(r, 30)); active--; return []; };
+  deps.sources.b.search = async () => [];
+  const p = startPoller(deps, { intervalSec: 3600, log: {} });
+  await Promise.all([p.runNow(search.id), p.runNow(search.id)]);
+  await p.stop();
+  assert.equal(maxActive, 1);
+});
+
+test('notifier passes a send timeout and drops 403 (key mismatch) subs', async () => {
+  const db = openDb(':memory:');
+  db.addSubscription({ endpoint: 'mismatch', keys: {} });
+  const opts = [];
+  const webpush = { setVapidDetails() {}, async sendNotification(_s, _p, o) { opts.push(o); const e = new Error('Forbidden'); e.statusCode = 403; throw e; } };
+  const notify = createNotifier({ db, config: { vapidPublicKey: 'p', vapidPrivateKey: 'k', vapidSubject: 'mailto:a@b.c' }, webpush, now: () => '12:00' });
+  await notify({ name: 'x' }, HIT);
+  assert.ok(opts[0].timeout > 0 && opts[0].timeout <= 15000);
+  assert.equal(db.listSubscriptions().length, 0);
+});

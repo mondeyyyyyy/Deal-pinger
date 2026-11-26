@@ -39,9 +39,10 @@ export async function runSearchOnce(search, { db, sources, notify, ctx, getSoldP
       health?.record(sourceId, { ok: false, error: e.message });
       continue;
     }
-    const firstRun = !db.hasSeenSource(search.id, sourceId);
+    // Seeded = one successful fetch has happened for this source since the search's filters last changed.
+    const firstRun = !db.isSeeded(search.id, sourceId);
     const fresh = db.markSeen(search.id, listings.filter(l => matches(l, search)));
-    if (firstRun) continue;
+    if (firstRun) { db.markSeeded(search.id, sourceId); continue; }
     for (const listing of fresh) {
       const prices = await sold();
       const est = prices ? estimate(search, listing, prices) : null;
@@ -62,6 +63,13 @@ export function startPoller(deps, { intervalSec = 90, log = console } = {}) {
   let stopped = false;
   let timer = null;
   let running = Promise.resolve();
+  // Every run (timer or "Check now") goes through one queue so only one browser session is open at a time.
+  let queue = Promise.resolve();
+  const enqueue = (fn) => {
+    const p = queue.then(fn, fn);
+    queue = p.catch(() => {});
+    return p;
+  };
 
   const runOne = async (s) => {
     const r = await runSearchOnce(s, deps).catch(e => ({ newHits: [], errors: [{ source: '*', message: e.message }] }));
@@ -71,25 +79,32 @@ export function startPoller(deps, { intervalSec = 90, log = console } = {}) {
   };
 
   const tick = async () => {
-    for (const s of deps.db.listSearches()) {
+    for (const { id } of deps.db.listSearches()) {
       if (stopped) return;
-      if (s.enabled) await runOne(s);
+      // Re-read inside the queue so an edit made while waiting is respected.
+      await enqueue(() => {
+        const s = deps.db.getSearch(id);
+        return s?.enabled ? runOne(s) : null;
+      });
     }
   };
 
   const schedule = () => {
     if (stopped) return;
     const jitter = Math.random() * 0.2 * intervalSec * 1000;
-    timer = setTimeout(() => { running = tick().finally(schedule); }, intervalSec * 1000 + jitter);
+    timer = setTimeout(() => { running = safeTick().finally(schedule); }, intervalSec * 1000 + jitter);
   };
+  const safeTick = () => tick().catch(e => log.error?.(`poll loop error: ${e.message}`));
 
-  running = tick().finally(schedule);
+  running = safeTick().finally(schedule);
 
   return {
     stop() { stopped = true; clearTimeout(timer); return running; },
     runNow(searchId) {
-      const s = deps.db.getSearch(searchId);
-      return s ? runOne(s) : Promise.resolve(null);
+      return enqueue(() => {
+        const s = deps.db.getSearch(searchId);
+        return s ? runOne(s) : null;
+      });
     },
   };
 }

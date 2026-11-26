@@ -27,10 +27,14 @@ CREATE TABLE IF NOT EXISTS hits (
   status TEXT NOT NULL DEFAULT 'new',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS seeded (searchId INTEGER NOT NULL, source TEXT NOT NULL, PRIMARY KEY (searchId, source));
 CREATE TABLE IF NOT EXISTS subscriptions (endpoint TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT NOT NULL, at INTEGER NOT NULL);
 `;
+
+// Changing any of these changes which listings match, so the search must re-seed silently.
+const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
 const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'messageTemplate'];
 
@@ -67,6 +71,10 @@ export function openDb(file) {
     },
     updateSearch(id, patch) {
       const keys = FIELDS.filter(k => patch[k] !== undefined);
+      const before = getSearch(id);
+      if (before && MATCH_FIELDS.some(k => patch[k] !== undefined && toCol(k, patch[k]) !== toCol(k, before[k]))) {
+        db.prepare('DELETE FROM seeded WHERE searchId = ?').run(id);
+      }
       if (keys.length) {
         db.prepare(`UPDATE searches SET ${keys.map(k => `${k} = ?`).join(',')} WHERE id = ?`)
           .run(...keys.map(k => toCol(k, patch[k])), id);
@@ -74,6 +82,7 @@ export function openDb(file) {
       return getSearch(id);
     },
     deleteSearch(id) {
+      db.prepare('DELETE FROM seeded WHERE searchId = ?').run(id);
       db.prepare('DELETE FROM searches WHERE id = ?').run(id);
       db.prepare('DELETE FROM seen WHERE searchId = ?').run(id);
       db.prepare('DELETE FROM hits WHERE searchId = ?').run(id);
@@ -81,8 +90,11 @@ export function openDb(file) {
     hasSeenAny(searchId) {
       return !!db.prepare('SELECT 1 FROM seen WHERE searchId = ? LIMIT 1').get(searchId);
     },
-    hasSeenSource(searchId, source) {
-      return !!db.prepare('SELECT 1 FROM seen WHERE searchId = ? AND source = ? LIMIT 1').get(searchId, source);
+    isSeeded(searchId, source) {
+      return !!db.prepare('SELECT 1 FROM seeded WHERE searchId = ? AND source = ?').get(searchId, source);
+    },
+    markSeeded(searchId, source) {
+      db.prepare('INSERT OR IGNORE INTO seeded (searchId, source) VALUES (?, ?)').run(searchId, source);
     },
     markSeen(searchId, listings) {
       const ins = db.prepare('INSERT OR IGNORE INTO seen (searchId, source, listingId, price) VALUES (?, ?, ?, ?)');

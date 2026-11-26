@@ -23,10 +23,11 @@ export function createNotifier({ db, config, webpush, now, sourceLabel }) {
     let sent = 0;
     for (const sub of db.listSubscriptions()) {
       try {
-        await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: 'high' });
+        await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 3600, urgency: 'high', timeout: 10000 });
         sent++;
       } catch (e) {
-        if (e.statusCode === 404 || e.statusCode === 410) db.removeSubscription(sub.endpoint);
+        // 404/410: subscription gone; 403: it was made with different VAPID keys.
+        if ([403, 404, 410].includes(e.statusCode)) db.removeSubscription(sub.endpoint);
       }
     }
     return sent;
