@@ -188,7 +188,7 @@ export function openDb(file) {
       db.prepare("DELETE FROM seen WHERE COALESCE(lastSeenAt, seenAt) < datetime('now', ?)").run(`-${seenDays} days`);
       db.prepare("DELETE FROM hits WHERE status != 'saved' AND createdAt < datetime('now', ?)").run(`-${hitDays} days`);
       // Only expire sold-price lookups; other cache rows (e.g. the push keys) must survive.
-      db.prepare("DELETE FROM cache WHERE key LIKE 'sold:%' AND at < ?").run(Date.now() - 7 * 24 * 3600 * 1000);
+      db.prepare("DELETE FROM cache WHERE (key LIKE 'sold:%' OR key LIKE 'cex:%') AND at < ?").run(Date.now() - 7 * 24 * 3600 * 1000);
     },
     priceHistory(searchId) {
       return db.prepare('SELECT source, price, seenAt FROM seen WHERE searchId = ? AND price IS NOT NULL ORDER BY seenAt').all(searchId);

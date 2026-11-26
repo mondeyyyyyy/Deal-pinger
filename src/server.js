@@ -9,7 +9,11 @@ import { median } from './comps.js';
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const COOKIE = 'dp_session';
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-const HIT_STATUSES = ['new', 'saved', 'dismissed'];
+const HIT_STATUSES = ['new', 'saved', 'dismissed', 'flagged'];
+const SCAM_FILTERS = ['hide', 'flag', 'off'];
+const CEX_MODES = ['auto', 'off'];
+
+const DISCORD_HOOK = /^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
 
 const num = (v) => (v === '' || v == null ? null : Number.isFinite(Number(v)) ? Number(v) : NaN);
 
@@ -38,13 +42,29 @@ function cleanSearch(body, { partial }) {
   if (body.enabled !== undefined) out.enabled = !!body.enabled;
   if (body.intervalSec !== undefined) {
     const v = num(body.intervalSec);
-    if (v == null || Number.isNaN(v) || v < 30 || v > 3600) return err('Check every must be between 30 seconds and 1 hour');
+    if (v == null || Number.isNaN(v) || v < 15 || v > 3600) return err('Check every must be between 15 seconds and 1 hour');
     out.intervalSec = Math.round(v);
+  }
+  if (body.cexMode !== undefined) {
+    if (!CEX_MODES.includes(body.cexMode)) return err('Unknown CeX setting');
+    out.cexMode = body.cexMode;
+  }
+  for (const k of ['cexBoxId', 'cexName']) if (body[k] !== undefined) out[k] = String(body[k] || '').trim().slice(0, 200) || null;
+  if (body.discordWebhook !== undefined) {
+    const v = String(body.discordWebhook || '').trim();
+    if (v && !DISCORD_HOOK.test(v)) return err('That isn\'t a Discord webhook link');
+    out.discordWebhook = v || null;
   }
   return [out, null];
 }
 
-const DISCORD_HOOK = /^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
+/** A search as the app sees it: its own Discord webhook is never sent back, only whether it's set. */
+function publicSearch(s) {
+  if (!s) return s;
+  const { discordWebhook, ...rest } = s;
+  return { ...rest, hasDiscordWebhook: !!discordWebhook };
+}
+
 const TG_TOKEN = /^\d+:[\w-]{2,}$/;
 
 /** Settings as the app sees them: channel secrets are never sent back, only whether they're set. */
@@ -54,6 +74,8 @@ function publicSettings(s) {
     quietEnd: s.quietEnd,
     feePct: s.feePct,
     discordConnected: !!s.discordWebhook,
+    discordMention: s.discordMention,
+    scamFilter: s.scamFilter,
     telegramHasToken: !!s.telegramBotToken,
     telegramConnected: !!(s.telegramBotToken && s.telegramChatId),
   };
@@ -67,7 +89,7 @@ function csvCell(v) {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function createApp({ db, config, runNow, notify, health, linkTelegram }) {
+export function createApp({ db, config, runNow, notify, health, linkTelegram, cex }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
@@ -106,14 +128,14 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram }) 
 
   app.get('/api/sources', (_req, res) => res.json(SOURCE_IDS.map(id => ({ id, label: SOURCES[id].label }))));
 
-  app.get('/api/searches', (_req, res) => res.json(db.listSearches()));
+  app.get('/api/searches', (_req, res) => res.json(db.listSearches().map(publicSearch)));
 
   app.post('/api/searches', (req, res) => {
     const [s, error] = cleanSearch(req.body || {}, { partial: false });
     if (error) return res.status(400).json({ error });
     const created = db.addSearch(s);
     runNow(created.id).catch(() => {});
-    res.status(201).json(created);
+    res.status(201).json(publicSearch(created));
   });
 
   const findSearch = (req, res, next) => {
@@ -124,7 +146,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram }) 
   app.put('/api/searches/:id', findSearch, (req, res) => {
     const [patch, error] = cleanSearch(req.body || {}, { partial: true });
     if (error) return res.status(400).json({ error });
-    res.json(db.updateSearch(req.search.id, patch));
+    res.json(publicSearch(db.updateSearch(req.search.id, patch)));
   });
 
   app.delete('/api/searches/:id', findSearch, (req, res) => { db.deleteSearch(req.search.id); res.status(204).end(); });
@@ -174,6 +196,15 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram }) 
       if (v && !DISCORD_HOOK.test(v)) return res.status(400).json({ error: 'That isn\'t a Discord webhook link' });
       patch.discordWebhook = v;
     }
+    if (req.body?.scamFilter !== undefined) {
+      if (!SCAM_FILTERS.includes(req.body.scamFilter)) return res.status(400).json({ error: 'Unknown scam filter setting' });
+      patch.scamFilter = req.body.scamFilter;
+    }
+    if (req.body?.discordMention !== undefined) {
+      const v = String(req.body.discordMention || '').trim();
+      if (v && !['@everyone', '@here'].includes(v) && !/^\d{5,25}$/.test(v)) return res.status(400).json({ error: 'Mention must be @everyone, @here or a role ID' });
+      patch.discordMention = v;
+    }
     if (req.body?.telegramBotToken !== undefined) {
       const v = String(req.body.telegramBotToken || '').trim();
       if (v && !TG_TOKEN.test(v)) return res.status(400).json({ error: 'That isn\'t a Telegram bot token' });
@@ -189,6 +220,12 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram }) 
     } catch (e) {
       res.status(400).json({ error: e.message });
     }
+  });
+
+  app.get('/api/cex/search', async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json([]);
+    try { res.json((await cex.search(q, 8)).slice(0, 8)); } catch (e) { res.status(502).json({ error: `CeX didn't answer: ${e.message}` }); }
   });
 
   app.get('/api/flips', (_req, res) => res.json({ flips: db.listFlips(), summary: db.flipSummary() }));

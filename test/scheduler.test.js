@@ -122,3 +122,20 @@ test('bursts go through notify.batch when available', async () => {
   await runSourceOnce(s, 'a', d);
   assert.deepEqual(batches, [5]);
 });
+
+test('prices are pre-loaded for each enabled search, then refreshed every few hours', async () => {
+  const d = deps({ f: { search: async () => [] } });
+  const warmed = [];
+  d.warm = async (s) => { warmed.push(s.name); };
+  d.db.addSearch({ name: 'on', keywords: 'a', sources: ['f'] });
+  d.db.addSearch({ name: 'off', keywords: 'b', sources: ['f'], enabled: false });
+  let now = 0;
+  const p = startPoller(d, { tickMs: 3600000, now: () => now, jitter: 0, log: {} });
+  await sleep(5);
+  assert.deepEqual(warmed, ['on']);
+  now = 3600000; p.tick(); await sleep(5);
+  assert.deepEqual(warmed, ['on']);
+  now = 6 * 3600000 + 1; p.tick(); await sleep(5);
+  assert.deepEqual(warmed, ['on', 'on']);
+  await p.stop();
+});

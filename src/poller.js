@@ -7,6 +7,7 @@ const COMPS_WAIT_MS = 2500;
 const SELLER_WAIT_MS = 3000; // seller-rating lookup for suspiciously cheap listings // never hold an alert longer than this for a sold-price lookup
 const PRICE_DROP_FRACTION = 0.05; // alert again when a seen listing gets at least 5% cheaper
 const PRUNE_EVERY_MS = 3600 * 1000;
+const WARM_EVERY_MS = 6 * 3600 * 1000;
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
 export function createHealth() {
@@ -138,6 +139,7 @@ export function startPoller(deps, {
   const running = new Map(); // "searchId:sourceId" -> promise
   let stopped = false;
   let lastPrune = -Infinity;
+  const lastWarm = new Map(); // searchId -> ms
 
   const laneOf = (src) => laneLocks[src.lane] || laneLocks.fetch;
   // Lets a source run part of its work in another lane, e.g. Vinted's browser fallback.
@@ -194,6 +196,16 @@ export function startPoller(deps, {
       const counts = {};
       for (const s of searches) for (const id of s.sources) counts[id] = (counts[id] || 0) + 1;
       const active = new Set();
+      // Pre-load sold prices and CeX prices so alerts have them instantly (caches last 12-24h).
+      if (deps.warm) {
+        for (const s of searches) {
+          // Keyed on what the lookups depend on, so editing keywords or the CeX item warms straight away.
+          const wkey = `${s.id}|${s.keywords}|${s.cexBoxId ?? ''}|${s.cexMode ?? ''}`;
+          if (now() - (lastWarm.get(wkey) ?? -Infinity) < WARM_EVERY_MS) continue;
+          lastWarm.set(wkey, now());
+          Promise.resolve().then(() => deps.warm(s)).catch(() => {});
+        }
+      }
       for (const s of searches) {
         for (const sourceId of s.sources) {
           const src = sources[sourceId];

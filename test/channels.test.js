@@ -46,7 +46,7 @@ test('sends to Discord and Telegram when configured', async () => {
   const tg = posts.find(p => p.url === 'https://api.telegram.org/bot123:AB/sendMessage');
   assert.equal(tg.body.chat_id, '42');
   assert.match(tg.body.text, /Switch Lite/);
-  assert.match(tg.body.text, /https:\/\/www\.vinted\.co\.uk\/items\/9/);
+  assert.equal(tg.body.reply_markup.inline_keyboard[0].at(-1).url, 'https://www.vinted.co.uk/items/9');
 });
 
 test('quiet hours silence every channel', async () => {

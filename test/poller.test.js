@@ -110,7 +110,7 @@ test('notifier sends to all subs and drops dead (410) ones', async () => {
   await notify({ name: 'Switch' }, HIT);
   assert.equal(calls.length, 2);
   assert.match(calls[0].payload.title, /£80/);
-  assert.match(calls[0].payload.body, /\+£61\.5 profit/);
+  assert.match(calls[0].payload.body, /\+£61\.50 profit/);
   assert.equal(calls[0].payload.url, 'https://x/9');
   assert.deepEqual(db.listSubscriptions().map(s => s.endpoint), ['good']);
 });
