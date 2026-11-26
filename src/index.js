@@ -4,7 +4,7 @@ import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { createApp } from './server.js';
 import { startPoller, createHealth } from './poller.js';
-import { createNotifier } from './notify.js';
+import { createNotifier, ensureVapid } from './notify.js';
 import { createCompsFetcher } from './comps.js';
 import { createFetch } from './net.js';
 import { withPage } from './browser.js';
@@ -15,10 +15,9 @@ if (!config.appPassword) {
   console.error('APP_PASSWORD is not set. Set it in your Railway variables.');
   process.exit(1);
 }
-if (!config.vapidPublicKey) console.warn('VAPID keys not set: push notifications are disabled. Run `npm run vapid`.');
-
 fs.mkdirSync(config.dataDir, { recursive: true });
 const db = openDb(config.dbFile);
+ensureVapid(db, config, webpush);
 const health = createHealth();
 const fetchFn = createFetch(config);
 const ctx = { config, fetch: fetchFn, withPage };

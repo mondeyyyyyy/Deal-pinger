@@ -39,3 +39,16 @@ export function createNotifier({ db, config, webpush, now, sourceLabel }) {
   notify.sendRaw = sendRaw;
   return notify;
 }
+
+/** Use VAPID keys from env; otherwise load (or create once) keys stored in the database. Mutates config. */
+export function ensureVapid(db, config, webpush) {
+  if (config.vapidPublicKey && config.vapidPrivateKey) return config;
+  let keys = db.cacheGet('vapid', Infinity);
+  if (!keys) {
+    keys = webpush.generateVAPIDKeys();
+    db.cacheSet('vapid', keys);
+  }
+  config.vapidPublicKey = keys.publicKey;
+  config.vapidPrivateKey = keys.privateKey;
+  return config;
+}

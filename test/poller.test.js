@@ -121,3 +121,19 @@ test('notifier is silent during quiet hours unless forced', async () => {
   await notify({ name: 'Switch' }, HIT, { force: true });
   assert.equal(calls.length, 2);
 });
+
+test('ensureVapid generates keys once and reuses them', async () => {
+  const { ensureVapid } = await import('../src/notify.js');
+  const db = openDb(':memory:');
+  let n = 0;
+  const webpush = { generateVAPIDKeys: () => ({ publicKey: 'pub' + ++n, privateKey: 'priv' + n }) };
+  const c1 = { vapidPublicKey: '', vapidPrivateKey: '' };
+  ensureVapid(db, c1, webpush);
+  assert.equal(c1.vapidPublicKey, 'pub1');
+  const c2 = { vapidPublicKey: '', vapidPrivateKey: '' };
+  ensureVapid(db, c2, webpush);
+  assert.equal(c2.vapidPublicKey, 'pub1');
+  const c3 = { vapidPublicKey: 'envpub', vapidPrivateKey: 'envpriv' };
+  ensureVapid(db, c3, webpush);
+  assert.equal(c3.vapidPublicKey, 'envpub');
+});
