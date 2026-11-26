@@ -18,8 +18,12 @@ export function keywordVariants(keywords) {
 /** The first variant: used for eBay sold prices and CeX matching. */
 export const mainKeywords = (keywords) => keywordVariants(keywords)[0] || '';
 
+// "WANTED: PS5" posts are buyers, and swap-only listings aren't for sale.
+const NOT_FOR_SALE = /^\W*(wanted|wtb|looking for|iso|in search of)\b|\b(swaps?|trades?) only\b/i;
+
 export function matches(listing, search) {
   const title = String(listing.title || '').toLowerCase();
+  if (NOT_FOR_SALE.test(title)) return false;
   const variants = keywordVariants(search.keywords);
   if (!variants.some(v => words(v).every(w => title.includes(w)))) return false;
   // Skip words match whole words/phrases, so "locked" doesn't hide "unlocked" and "case" doesn't hide "showcase".

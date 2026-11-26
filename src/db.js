@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS hits (
   searchId INTEGER NOT NULL,
   listing TEXT NOT NULL, estimate TEXT,
   status TEXT NOT NULL DEFAULT 'new',
+  alerted INTEGER NOT NULL DEFAULT 0,
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS seeded (searchId INTEGER NOT NULL, source TEXT NOT NULL, empty INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (searchId, source));
@@ -68,6 +69,7 @@ const MIGRATIONS = [
   ['searches', 'cexMode', "TEXT NOT NULL DEFAULT 'auto'"],
   ['searches', 'discordWebhook', 'TEXT'],
   ['seeded', 'empty', 'INTEGER NOT NULL DEFAULT 0'],
+  ['hits', 'alerted', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 function rowToSearch(r) {
@@ -220,6 +222,16 @@ export function openDb(file) {
       return db.prepare(`SELECT h.*, s.name AS searchName FROM hits h LEFT JOIN searches s ON s.id = h.searchId ${where} ORDER BY h.id DESC LIMIT ?`)
         .all(...args)
         .map(r => ({ ...r, listing: JSON.parse(r.listing), estimate: r.estimate ? JSON.parse(r.estimate) : null }));
+    },
+    /** Was this listing already sent to you by another search in the last hour? */
+    alertedElsewhere(searchId, listing, minutes = 60) {
+      return !!db.prepare(`SELECT 1 FROM hits WHERE alerted = 1 AND searchId != ? AND createdAt >= datetime('now', ?)
+        AND json_extract(listing, '$.source') = ? AND json_extract(listing, '$.id') = ? LIMIT 1`)
+        .get(searchId, `-${minutes} minutes`, listing.source, String(listing.id));
+    },
+    markAlerted(ids) {
+      const st = db.prepare('UPDATE hits SET alerted = 1 WHERE id = ?');
+      for (const id of ids) st.run(id);
     },
     getHit(id) {
       const r = db.prepare('SELECT * FROM hits WHERE id = ?').get(id);

@@ -42,6 +42,18 @@ export function parse(json) {
   });
 }
 
+/** Description and seller ratings for a new deal (one request, only for listings about to alert). */
+export async function details(listing, ctx) {
+  const cookie = cookies || (await getCookies(ctx));
+  const res = await ctx.fetch(`${BASE}/api/v2/items/${encodeURIComponent(listing.id)}`, { headers: { cookie, accept: 'application/json' } });
+  if (!res.ok) return null;
+  const it = (await res.json())?.item;
+  if (!it) return null;
+  const out = { description: it.description ?? null };
+  if (it.user && it.user.feedback_count != null) out.seller = { name: it.user.login ?? null, ratings: Number(it.user.feedback_count) };
+  return out;
+}
+
 /** Seller ratings, used by the scam check on suspiciously cheap listings. */
 export async function sellerInfo(listing, ctx) {
   if (!listing.sellerId) return null;

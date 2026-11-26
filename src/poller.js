@@ -93,7 +93,16 @@ export async function runSourceOnce(search, sourceId, deps) {
   const capped = (p, ms = wait) => withTimeout(p, ms, 'lookup').catch(() => null);
   const soldP = search.resaleOverride == null ? getSoldPrices(search.keywords).catch(() => null) : Promise.resolve([]);
   const cexP = deps.getCex ? deps.getCex(search).catch(() => null) : Promise.resolve(null);
-  let [prices, cex] = await Promise.all([capped(soldP), capped(cexP)]);
+  // Extra listing details (e.g. Vinted's description and seller ratings) are fetched for new deals
+  // only, alongside the price lookups, so they add no extra wait.
+  const detailsP = Promise.all(alerts.map((l) => (src.details ? capped(Promise.resolve().then(() => src.details(l, ctx)).catch(() => null)) : null)));
+  let [prices, cex, details] = await Promise.all([capped(soldP), capped(cexP), detailsP]);
+  alerts.forEach((l, i) => {
+    const d = details[i];
+    if (!d) return;
+    if (d.description && !l.description) l.description = String(d.description).slice(0, 2000);
+    if (d.seller && !l.seller) l.seller = d.seller;
+  });
   // When the price decides whether a deal is hidden (scam filter) or sent (profit minimum),
   // a slow lookup is worth waiting a little longer for. Usually it's pre-loaded and instant.
   if (prices === null && (scamFilter === 'hide' || search.minProfit != null)) prices = await capped(soldP, EXTRA_WAIT_MS);
@@ -127,9 +136,11 @@ export async function runSourceOnce(search, sourceId, deps) {
     // (An automatic CeX match alone isn't trusted for this: it can be the wrong model.)
     const profitKnown = est && (prices !== null || search.resaleOverride != null || est.cex?.pinned);
     const worthIt = search.minProfit == null || !profitKnown || est.bestProfit >= search.minProfit;
-    if (worthIt && !hidden) toAlert.push(hit);
+    // Another of your searches already sent this exact listing: keep the card, skip the second ping.
+    if (worthIt && !hidden && !db.alertedElsewhere(search.id, listing)) toAlert.push(hit);
   }
   if (toAlert.length) {
+    db.markAlerted(toAlert.map(h => h.id));
     if (notify.batch) await notify.batch(search, toAlert).catch(() => {});
     else for (const h of toAlert) await notify(search, h).catch(() => {});
   }
