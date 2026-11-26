@@ -18,16 +18,31 @@ export function parse(json) {
     const loc = it.itemLocation || {};
     const location = [loc.city, loc.stateOrProvince].filter(Boolean).join(', ') || null;
     const legacy = it.legacyItemId || String(it.itemId).split('|')[1] || it.itemId;
-    return {
+    const options = it.buyingOptions || [];
+    const auctionOnly = options.includes('AUCTION') && !options.includes('FIXED_PRICE');
+    const listing = {
       source: id,
       id: String(legacy),
-      title: it.title,
-      price: it.price ? parsePrice(it.price.value) : null,
+      // An auction's price is just the current bid, so say so.
+      title: auctionOnly ? `${it.title} (auction)` : it.title,
+      price: it.price ? parsePrice(it.price.value) : (it.currentBidPrice ? parsePrice(it.currentBidPrice.value) : null),
       url: `https://www.ebay.co.uk/itm/${legacy}`,
       image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
       location,
       postedAt: it.itemCreationDate || null,
     };
+    if (it.seller) {
+      listing.seller = {
+        name: it.seller.username ?? null,
+        ratings: it.seller.feedbackScore != null ? Number(it.seller.feedbackScore) : null,
+        positivePct: it.seller.feedbackPercentage != null ? Number(it.seller.feedbackPercentage) : null,
+      };
+    }
+    // Buy It Now listings can go straight to eBay checkout.
+    if (options.includes('FIXED_PRICE')) {
+      listing.buyUrl = `https://pay.ebay.co.uk/rxo?action=create&rypsvc=true&pagename=ryp&item=${legacy}&TransactionId=-1`;
+    }
+    return listing;
   });
 }
 

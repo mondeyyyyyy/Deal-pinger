@@ -18,7 +18,8 @@ export function estimate(search, listing, soldPrices, { feePct = 0 } = {}) {
   const override = search.resaleOverride ?? null;
   const value = override ?? median(soldPrices || []);
   if (value == null || listing.price == null) return null;
-  const profit = round2(value * (1 - feePct / 100) - (search.shipEstimate ?? 4) - listing.price);
+  const cost = listing.price + (listing.extraCost || 0); // e.g. Vinted's buyer protection fee
+  const profit = round2(value * (1 - feePct / 100) - (search.shipEstimate ?? 4) - cost);
   const base = Math.max(listing.price, 1);
   const score = Math.max(0, Math.min(100, Math.round((profit / base) * 100)));
   return { value: round2(value), profit, score, comps: override != null ? 0 : soldPrices.length };
@@ -58,3 +59,31 @@ export function createCompsFetcher({ db, fetchFn = fetch }) {
 }
 
 export const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+
+/**
+ * Everything we know about a deal's value: eBay resale estimate (or your own figure) and CeX prices.
+ * bestProfit is the better of eBay resale profit and selling to CeX for cash; score is based on it.
+ * refValue is the "usual price" used by the scam check.
+ */
+export function buildEstimate(search, listing, { prices = null, cex = null, feePct = 0 } = {}) {
+  const e = prices || search.resaleOverride != null ? estimate(search, listing, prices || [], { feePct }) : null;
+  const price = listing.price;
+  const cexPart = cex && price != null && cex.cash != null ? {
+    name: cex.name, url: cex.url, sell: cex.sell, cash: cex.cash, voucher: cex.voucher,
+    cashProfit: round2(cex.cash - price - (listing.extraCost || 0)),
+    voucherProfit: cex.voucher != null ? round2(cex.voucher - price - (listing.extraCost || 0)) : null,
+  } : null;
+  if (!e && !cexPart) return null;
+  const profits = [e?.profit, cexPart?.cashProfit].filter((n) => n != null);
+  const bestProfit = Math.max(...profits);
+  const base = Math.max(price ?? 0, 1);
+  return {
+    value: e?.value ?? null,
+    profit: e?.profit ?? null,
+    comps: e?.comps ?? 0,
+    cex: cexPart,
+    bestProfit,
+    refValue: e?.value ?? cex?.sell ?? null,
+    score: Math.max(0, Math.min(100, Math.round((bestProfit / base) * 100))),
+  };
+}

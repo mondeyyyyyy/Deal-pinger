@@ -4,7 +4,7 @@ import { withPage } from '../browser.js';
 export const id = 'vinted';
 export const label = 'Vinted';
 export const lane = 'fetch';
-export const minIntervalSec = 20;
+export const minIntervalSec = 15;
 
 const BASE = 'https://www.vinted.co.uk';
 
@@ -13,18 +13,45 @@ export function parse(json) {
   return (json.items || []).map((it) => {
     const raw = it.price && typeof it.price === 'object' ? it.price.amount : it.price;
     const url = String(it.url || `/items/${it.id}`);
-    return {
+    const price = parsePrice(raw);
+    const totalRaw = it.total_item_price && typeof it.total_item_price === 'object' ? it.total_item_price.amount : it.total_item_price;
+    const total = parsePrice(totalRaw);
+    const listing = {
       source: id,
       id: String(it.id),
       title: [it.title, it.size_title].filter(Boolean).join(' · ') || 'Vinted item',
-      price: parsePrice(raw),
+      price,
       url: url.startsWith('http') ? url : BASE + url,
       image: it.photo?.url || null,
       location: null,
       // The first photo's upload time is effectively when the item was listed.
       postedAt: it.photo?.high_resolution?.timestamp ? new Date(it.photo.high_resolution.timestamp * 1000).toISOString() : null,
+      buyUrl: `${BASE}/transaction/buy/new?source_screen=item&transaction%5Bitem_id%5D=${it.id}`,
     };
+    // Vinted adds a buyer protection fee on top of the price; count it as part of the cost.
+    if (price != null && total != null && total > price) listing.extraCost = Math.round((total - price) * 100) / 100;
+    if (it.user?.id != null) {
+      listing.sellerId = String(it.user.id);
+      listing.sellerName = it.user.login ?? null;
+    }
+    return listing;
   });
+}
+
+/** Seller ratings, used by the scam check on suspiciously cheap listings. */
+export async function sellerInfo(listing, ctx) {
+  if (!listing.sellerId) return null;
+  const cookie = cookies || (await getCookies(ctx));
+  const res = await ctx.fetch(`${BASE}/api/v2/users/${encodeURIComponent(listing.sellerId)}`, { headers: { cookie, accept: 'application/json' } });
+  if (!res.ok) return null;
+  const u = (await res.json())?.user;
+  if (!u) return null;
+  return {
+    name: u.login ?? listing.sellerName ?? null,
+    ratings: u.feedback_count != null ? Number(u.feedback_count) : null,
+    sold: u.given_item_count != null ? Number(u.given_item_count) : null,
+    joinedAt: u.created_at ?? null,
+  };
 }
 
 export function buildApiUrl(s) {

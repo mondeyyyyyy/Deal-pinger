@@ -69,6 +69,7 @@ test('vinted api parse', () => {
   assert.equal(ls[0].id, '4812345678');
   assert.equal(ls[0].price, 85);
   assert.equal(ls[0].image, 'https://images1.vinted.net/t/a.jpeg');
+  assert.equal(ls[0].extraCost, 4.95); // buyer protection fee
   assert.equal(ls[1].price, 20);
   assert.equal(ls[1].url, 'https://www.vinted.co.uk/items/4812345679-switch-games-bundle');
 });
@@ -121,7 +122,7 @@ test('each marketplace declares its lane and minimum interval', () => {
   assert.equal(SOURCES.ebay.lane, 'fetch');
   assert.equal(SOURCES.vinted.lane, 'fetch');
   for (const id of ['facebook', 'gumtree', 'depop']) assert.equal(SOURCES[id].lane, 'browser', id);
-  assert.equal(SOURCES.vinted.minIntervalSec, 20);
+  assert.equal(SOURCES.vinted.minIntervalSec, 15);
   assert.equal(SOURCES.facebook.minIntervalSec, 45);
 });
 
@@ -135,4 +136,36 @@ test('eBay slows itself down to stay inside the API daily limit', () => {
 test('vinted listing time comes from the photo timestamp', () => {
   const [l] = SOURCES.vinted.parse({ items: [{ id: 1, title: 't', price: '5', url: '/items/1', photo: { url: 'https://i/x', high_resolution: { timestamp: 1764100000 } } }] });
   assert.equal(l.postedAt, new Date(1764100000 * 1000).toISOString());
+});
+
+test('vinted: buy-now link, seller id, 15s minimum', () => {
+  const [l] = SOURCES.vinted.parse({ items: [{ id: 42, title: 't', price: '5', url: '/items/42', user: { id: 7, login: 'bob' } }] });
+  assert.equal(l.buyUrl, 'https://www.vinted.co.uk/transaction/buy/new?source_screen=item&transaction%5Bitem_id%5D=42');
+  assert.equal(l.sellerId, '7');
+  assert.equal(l.sellerName, 'bob');
+  assert.equal(SOURCES.vinted.minIntervalSec, 15);
+});
+
+test('vinted seller ratings from the user API', async () => {
+  const ctx = { fetch: async (url) => {
+    if (url.endsWith('/')) return { ok: true, status: 200, headers: { getSetCookie: () => ['a=b; Path=/'] } };
+    assert.match(url, /\/api\/v2\/users\/7$/);
+    return { ok: true, status: 200, json: async () => ({ user: { feedback_count: 0, feedback_reputation: 0, given_item_count: 0 } }) };
+  } };
+  SOURCES.vinted._resetForTests();
+  const seller = await SOURCES.vinted.sellerInfo({ sellerId: '7' }, ctx);
+  assert.equal(seller.ratings, 0);
+  assert.equal(seller.sold, 0);
+});
+
+test('ebay api: seller feedback and buy-now link only for Buy It Now', () => {
+  const [bin, auction] = SOURCES.ebay.parse({ itemSummaries: [
+    { itemId: 'v1|111|0', legacyItemId: '111', title: 'PS5', price: { value: '300' }, buyingOptions: ['FIXED_PRICE', 'BEST_OFFER'], seller: { username: 'shop', feedbackScore: 0, feedbackPercentage: '0.0' } },
+    { itemId: 'v1|222|0', legacyItemId: '222', title: 'PS5', price: { value: '100' }, buyingOptions: ['AUCTION'], seller: { username: 'x', feedbackScore: 1200, feedbackPercentage: '99.8' } },
+  ] });
+  assert.equal(bin.buyUrl, 'https://pay.ebay.co.uk/rxo?action=create&rypsvc=true&pagename=ryp&item=111&TransactionId=-1');
+  assert.deepEqual(bin.seller, { name: 'shop', ratings: 0, positivePct: 0 });
+  assert.equal(auction.buyUrl, undefined);
+  assert.equal(auction.seller.ratings, 1200);
+  assert.match(auction.title, /auction/i);
 });

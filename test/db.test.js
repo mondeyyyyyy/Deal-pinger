@@ -58,7 +58,7 @@ test('price history and settings', () => {
   const hist = db.priceHistory(s.id);
   assert.equal(hist.length, 1);
   assert.equal(hist[0].price, 100);
-  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0, discordWebhook: null, telegramBotToken: null, telegramChatId: null });
+  assert.deepEqual(db.getSettings(), { quietStart: null, quietEnd: null, feePct: 0, discordWebhook: null, telegramBotToken: null, telegramChatId: null, discordMention: null, scamFilter: 'hide' });
   db.setSettings({ quietStart: '23:00', quietEnd: '07:00' });
   assert.equal(db.getSettings().quietStart, '23:00');
 });
@@ -163,4 +163,11 @@ test('M6: one-time migration drops US marketplaces and re-seeds', () => {
   db.markSeeded(a.id, 'ebay');
   db.migrateSources(['ebay']);
   assert.equal(db.isSeeded(a.id, 'ebay'), true); // runs once only
+});
+
+test('scam filter setting defaults to hide', () => {
+  const db = openDb(':memory:');
+  assert.equal(db.getSettings().scamFilter, 'hide');
+  db.setSettings({ scamFilter: 'flag' });
+  assert.equal(db.getSettings().scamFilter, 'flag');
 });

@@ -77,6 +77,7 @@ test('UK estimate: fee is a setting (default 0%) and a resale override wins over
   assert.equal(e2.value, 150);
   assert.equal(e2.profit, 46);
   assert.equal(e2.comps, 0);
+  assert.equal(estimate({ shipEstimate: 4 }, { ...L('x', 100), extraCost: 5 }, [200]).profit, 91); // Vinted buyer fee counts as cost
   const e3 = estimate({ shipEstimate: 4, resaleOverride: 150 }, L('x', 100), null);
   assert.equal(e3.value, 150);
 });

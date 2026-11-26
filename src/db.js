@@ -14,7 +14,10 @@ CREATE TABLE IF NOT EXISTS searches (
   shipEstimate REAL NOT NULL DEFAULT 4,
   resaleOverride REAL,
   intervalSec INTEGER NOT NULL DEFAULT 60,
-  messageTemplate TEXT NOT NULL DEFAULT 'Hi! Is this still available? I can collect today for {offer}.',
+  cexBoxId TEXT, cexName TEXT,
+  cexMode TEXT NOT NULL DEFAULT 'auto',
+  discordWebhook TEXT,
+  messageTemplate TEXT NOT NULL DEFAULT 'Hi! Is this still available? {collect}Would you take {offer}?',
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS seen (
@@ -47,19 +50,23 @@ CREATE TABLE IF NOT EXISTS flips (
 `;
 
 const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'soldPrice', 'soldAt', 'fees', 'notes'];
-const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'telegramBotToken', 'telegramChatId'];
+const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter'];
 
 // Changing any of these changes which listings match, so the search must re-seed silently.
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
 
-const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'intervalSec', 'messageTemplate'];
-const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride'];
+const FIELDS = ['name', 'keywords', 'excludeWords', 'minPrice', 'maxPrice', 'zip', 'radius', 'sources', 'enabled', 'minProfit', 'shipEstimate', 'resaleOverride', 'intervalSec', 'cexBoxId', 'cexName', 'cexMode', 'discordWebhook', 'messageTemplate'];
+const NULLABLE = ['minPrice', 'maxPrice', 'minProfit', 'resaleOverride', 'cexBoxId', 'cexName', 'discordWebhook'];
 
 // Columns added after the first release; added to older databases on startup.
 const MIGRATIONS = [
   ['searches', 'resaleOverride', 'REAL'],
   ['searches', 'intervalSec', 'INTEGER NOT NULL DEFAULT 60'],
   ['seen', 'lastSeenAt', 'TEXT'],
+  ['searches', 'cexBoxId', 'TEXT'],
+  ['searches', 'cexName', 'TEXT'],
+  ['searches', 'cexMode', "TEXT NOT NULL DEFAULT 'auto'"],
+  ['searches', 'discordWebhook', 'TEXT'],
 ];
 
 function rowToSearch(r) {
@@ -186,10 +193,10 @@ export function openDb(file) {
     priceHistory(searchId) {
       return db.prepare('SELECT source, price, seenAt FROM seen WHERE searchId = ? AND price IS NOT NULL ORDER BY seenAt').all(searchId);
     },
-    addHit(searchId, listing, estimate = null) {
-      const r = db.prepare('INSERT INTO hits (searchId, listing, estimate) VALUES (?, ?, ?)')
-        .run(searchId, JSON.stringify(listing), estimate ? JSON.stringify(estimate) : null);
-      return { id: Number(r.lastInsertRowid), searchId, listing, estimate, status: 'new' };
+    addHit(searchId, listing, estimate = null, status = 'new') {
+      const r = db.prepare('INSERT INTO hits (searchId, listing, estimate, status) VALUES (?, ?, ?, ?)')
+        .run(searchId, JSON.stringify(listing), estimate ? JSON.stringify(estimate) : null, status);
+      return { id: Number(r.lastInsertRowid), searchId, listing, estimate, status };
     },
     recentHits(limit = 100, { includeDismissed = false } = {}) {
       const where = includeDismissed ? '' : "WHERE h.status != 'dismissed'";
@@ -218,6 +225,8 @@ export function openDb(file) {
         discordWebhook: rows.discordWebhook ?? null,
         telegramBotToken: rows.telegramBotToken ?? null,
         telegramChatId: rows.telegramChatId ?? null,
+        discordMention: rows.discordMention ?? null,
+        scamFilter: rows.scamFilter ?? 'hide',
       };
     },
     setSettings(patch) {

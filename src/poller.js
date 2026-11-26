@@ -1,8 +1,10 @@
 import { matches } from './match.js';
-import { estimate } from './comps.js';
+import { buildEstimate } from './comps.js';
+import { assessScam } from './scam.js';
 
 const SOURCE_TIMEOUT_MS = 120000;
-const COMPS_WAIT_MS = 2500; // never hold an alert longer than this for a sold-price lookup
+const COMPS_WAIT_MS = 2500;
+const SELLER_WAIT_MS = 3000; // seller-rating lookup for suspiciously cheap listings // never hold an alert longer than this for a sold-price lookup
 const PRICE_DROP_FRACTION = 0.05; // alert again when a seen listing gets at least 5% cheaper
 const PRUNE_EVERY_MS = 3600 * 1000;
 const MATCH_FIELDS = ['keywords', 'minPrice', 'maxPrice', 'excludeWords'];
@@ -58,20 +60,30 @@ export async function runSourceOnce(search, sourceId, deps) {
   const alerts = [...fresh, ...drops.map(d => ({ ...d.listing, previousPrice: d.previousPrice }))];
   if (!alerts.length) return { newHits: [], error: null };
 
-  // Sold prices are cached for 12h. If a lookup is slow, alert without an estimate; it finishes in the background.
-  let prices = [];
-  if (search.resaleOverride == null) {
-    const lookup = getSoldPrices(search.keywords).catch(() => null);
-    prices = await withTimeout(lookup, deps.compsWaitMs ?? COMPS_WAIT_MS, 'comps').catch(() => null);
-  }
-  const { feePct } = db.getSettings();
+  // Sold prices (12h cache) and CeX prices (24h cache) are looked up together. If either is slow,
+  // alert without it rather than wait; the lookup finishes in the background and is cached.
+  const wait = deps.compsWaitMs ?? COMPS_WAIT_MS;
+  const capped = (p) => withTimeout(p.catch(() => null), wait, 'lookup').catch(() => null);
+  const [prices, cex] = await Promise.all([
+    search.resaleOverride == null ? capped(getSoldPrices(search.keywords)) : Promise.resolve([]),
+    deps.getCex ? capped(deps.getCex(search)) : Promise.resolve(null),
+  ]);
+  const { feePct, scamFilter } = db.getSettings();
   const newHits = [];
   const toAlert = [];
   for (const listing of alerts) {
-    const est = prices ? estimate(search, listing, prices, { feePct }) : null;
-    const hit = db.addHit(search.id, listing, est);
+    const est = buildEstimate(search, listing, { prices, cex, feePct });
+    // Only suspiciously cheap listings cost an extra request to look up the seller's ratings.
+    const ref = est?.refValue;
+    if (src.sellerInfo && !listing.seller && ref && listing.price != null && listing.price <= ref * 0.6) {
+      listing.seller = await withTimeout(src.sellerInfo(listing, ctx), SELLER_WAIT_MS, 'seller').catch(() => null);
+    }
+    listing.scam = assessScam(listing, { value: ref ?? null });
+    const hidden = scamFilter !== 'off' && scamFilter !== 'flag' && listing.scam.risk === 'high';
+    const hit = db.addHit(search.id, listing, est, hidden ? 'flagged' : 'new');
     newHits.push(hit);
-    if (search.minProfit == null || (est && est.profit >= search.minProfit)) toAlert.push(hit);
+    const worthIt = search.minProfit == null || (est && est.bestProfit >= search.minProfit);
+    if (worthIt && !hidden) toAlert.push(hit);
   }
   if (toAlert.length) {
     if (notify.batch) await notify.batch(search, toAlert).catch(() => {});

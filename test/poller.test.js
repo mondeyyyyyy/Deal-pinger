@@ -8,6 +8,7 @@ const L = (source, id, price = 50, title = 'nintendo switch') => ({ source, id, 
 
 function setup(extra = {}) {
   const db = openDb(':memory:');
+  db.setSettings({ scamFilter: 'off' }); // these tests use deliberately cheap prices
   const search = db.addSearch({ name: 'Switch', keywords: 'switch', sources: ['a', 'b'], ...extra });
   const feeds = { a: [L('a', '1')], b: [L('b', '1')] };
   const sources = {
