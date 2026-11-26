@@ -50,19 +50,19 @@ async function getContext(config, key) {
   const browser = await getBrowser(config);
   let entry = contexts.get(key);
   if (entry && entry.uses >= RECYCLE_AFTER) {
+    // Retire it: no new pages; it closes when its last open page closes.
     contexts.delete(key);
-    const old = entry.promise;
-    // Close once its in-flight pages are done.
-    setTimeout(() => old.then(c => c.close()).catch(() => {}), 60000);
+    entry.retired = true;
+    if (entry.open === 0) entry.promise.then(c => c.close()).catch(() => {});
     entry = null;
   }
   if (!entry) {
-    entry = { promise: newContext(browser), uses: 0 };
+    entry = { promise: newContext(browser), uses: 0, open: 0, retired: false };
     contexts.set(key, entry);
     entry.promise.catch(() => contexts.delete(key));
   }
   entry.uses++;
-  return entry.promise;
+  return entry;
 }
 
 export const contextCount = () => contexts.size;
@@ -73,12 +73,18 @@ export async function withPage(config, fn, { key } = {}) {
     const context = await newContext(await getBrowser(config));
     try { return await fn(await context.newPage()); } finally { await context.close().catch(() => {}); }
   }
-  const context = await getContext(config, key);
-  const page = await context.newPage();
+  const entry = await getContext(config, key);
+  entry.open++;
   try {
-    return await fn(page);
+    const page = await (await entry.promise).newPage();
+    try {
+      return await fn(page);
+    } finally {
+      await page.close().catch(() => {});
+    }
   } finally {
-    await page.close().catch(() => {});
+    entry.open--;
+    if (entry.retired && entry.open === 0) entry.promise.then(c => c.close()).catch(() => {});
   }
 }
 
