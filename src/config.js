@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 export function loadConfig(env = process.env) {
@@ -7,7 +8,7 @@ export function loadConfig(env = process.env) {
     dataDir,
     dbFile: path.join(dataDir, 'deal-pinger.db'),
     appPassword: env.APP_PASSWORD || '',
-    sessionSecret: env.SESSION_SECRET || env.APP_PASSWORD || 'dev-secret',
+    sessionSecret: env.SESSION_SECRET || null, // otherwise a random one is created and stored (ensureSessionSecret)
     vapidPublicKey: env.VAPID_PUBLIC_KEY || '',
     vapidPrivateKey: env.VAPID_PRIVATE_KEY || '',
     vapidSubject: env.VAPID_SUBJECT || 'mailto:admin@example.com',
@@ -19,4 +20,16 @@ export function loadConfig(env = process.env) {
     browserConcurrency: Math.max(1, Math.floor(Number(env.BROWSER_CONCURRENCY)) || 2),
     timezone: env.TZ || 'Europe/London',
   };
+}
+
+/** Sign login cookies with SESSION_SECRET, or a random secret created once and kept in the database. */
+export function ensureSessionSecret(db, config) {
+  if (config.sessionSecret) return config;
+  let secret = db.cacheGet('sessionSecret', Infinity);
+  if (!secret) {
+    secret = crypto.randomBytes(32).toString('hex');
+    db.cacheSet('sessionSecret', secret);
+  }
+  config.sessionSecret = secret;
+  return config;
 }

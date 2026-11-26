@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import webpush from 'web-push';
-import { loadConfig } from './config.js';
+import { loadConfig, ensureSessionSecret } from './config.js';
 import { openDb } from './db.js';
 import { createApp } from './server.js';
 import { startPoller, createHealth } from './poller.js';
@@ -21,6 +21,7 @@ if (!config.appPassword) {
 fs.mkdirSync(config.dataDir, { recursive: true });
 const db = openDb(config.dbFile);
 ensureVapid(db, config, webpush);
+ensureSessionSecret(db, config);
 db.migrateSources(SOURCE_IDS);
 const health = createHealth();
 const fetchFn = createFetch(config);

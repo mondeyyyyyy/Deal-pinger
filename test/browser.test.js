@@ -23,3 +23,12 @@ test('reuses one warm browser session per marketplace', async () => {
   await scrapeCards({ proxyUrl: '' }, html, 'a', { key: 'siteB' });
   assert.equal(contextCount(), 3); // test + siteA + siteB
 });
+
+test('a login wall or captcha with no listings is reported as blocked, not as 0 results', async () => {
+  const wall = page('<title>Log in to Facebook</title><form><input name="email"></form>');
+  await assert.rejects(scrapeCards({ proxyUrl: '' }, wall, 'a[href*="/item/"]', { key: 'test' }), /blocked|log ?in/i);
+  const captcha = page('<title>Just a moment...</title><div id="challenge-form">Checking your browser</div>');
+  await assert.rejects(scrapeCards({ proxyUrl: '' }, captcha, 'a[href*="/item/"]', { key: 'test' }), /blocked|captcha|check/i);
+  const empty = page('<title>Search results</title><p>No results for "zzz"</p>');
+  assert.deepEqual(await scrapeCards({ proxyUrl: '' }, empty, 'a[href*="/item/"]', { key: 'test' }), []);
+});

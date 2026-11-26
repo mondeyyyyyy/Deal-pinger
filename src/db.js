@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS flips (
 );
 `;
 
-const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'soldPrice', 'soldAt', 'fees', 'notes'];
+const FLIP_FIELDS = ['hitId', 'title', 'source', 'url', 'image', 'boughtPrice', 'boughtAt', 'soldPrice', 'soldAt', 'fees', 'notes'];
 const SETTING_KEYS = ['quietStart', 'quietEnd', 'discordWebhook', 'discordMention', 'telegramBotToken', 'telegramChatId', 'scamFilter', 'tapOpens', 'sessionVersion', 'digestTime', 'lastDigestDate', 'quietMissed'];
 
 // Changing any of these changes which listings match, so the search must re-seed silently.

@@ -17,7 +17,23 @@ const TAP_OPENS = ['listing', 'buy'];
 
 const DISCORD_HOOK = /^https:\/\/(?:canary\.|ptb\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[\w-]+$/;
 
-const num = (v) => (v === '' || v == null ? null : Number.isFinite(Number(v)) ? Number(v) : NaN);
+// Accepts 50, "50", "£50", "1,250.00". Empty → null; anything else → NaN.
+const num = (v) => {
+  if (v === '' || v == null) return null;
+  const n = Number(typeof v === 'string' ? v.replace(/[£,\s]/g, '') : v);
+  return Number.isFinite(n) ? n : NaN;
+};
+const FIELD_ERRORS = {
+  minPrice: 'Min price must be a number of pounds',
+  maxPrice: 'Max price must be a number of pounds',
+  minProfit: 'Minimum profit must be a number of pounds',
+  shipEstimate: 'Postage cost must be a number of pounds',
+  resaleOverride: 'Resale price must be a number of pounds',
+  radius: 'Radius must be a number of miles',
+  boughtPrice: 'What you paid must be a number of pounds',
+  soldPrice: 'Sold price must be a number of pounds',
+  fees: 'Fees must be a number of pounds',
+};
 
 /** Validate and normalise a search body. Returns [patch, error]. */
 function cleanSearch(body, { partial }) {
@@ -36,7 +52,7 @@ function cleanSearch(body, { partial }) {
   for (const k of ['minPrice', 'maxPrice', 'minProfit', 'shipEstimate', 'radius', 'resaleOverride']) {
     if (body[k] === undefined) continue;
     const v = num(body[k]);
-    if (Number.isNaN(v) || (v != null && v < 0)) return err(`${k} must be a positive number`);
+    if (Number.isNaN(v) || (v != null && v < 0)) return err(FIELD_ERRORS[k]);
     if (k === 'shipEstimate' || k === 'radius') { if (v != null) out[k] = v; } else out[k] = v;
   }
   if (body.zip !== undefined) out.zip = String(body.zip).trim().toUpperCase(); // UK postcode
@@ -181,8 +197,8 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
 
   app.get('/api/hits', (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
-    let hits = db.recentHits(limit);
-    if (req.query.status) hits = hits.filter(h => h.status === req.query.status);
+    const status = HIT_STATUSES.includes(req.query.status) ? req.query.status : null;
+    const hits = db.recentHits(limit, { status });
     res.json(hits);
   });
 
@@ -190,7 +206,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     const status = req.body?.status;
     if (!HIT_STATUSES.includes(status)) return res.status(400).json({ error: 'Bad status' });
     const id = Number(req.params.id);
-    const before = db.recentHits(1000, { includeDismissed: true }).find(h => h.id === id);
+    const before = db.getHit(id);
     // "Not a scam": remember it so a later price drop doesn't hide it again.
     if (before?.status === 'flagged' && status !== 'flagged' && status !== 'dismissed') db.cacheSet(`trust:${before.listing.source}:${before.listing.id}`, 1);
     db.setHitStatus(id, status);
@@ -267,21 +283,41 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
   app.post('/api/restore', express.json({ limit: '5mb' }), (req, res) => {
     const b = req.body || {};
     if (!Array.isArray(b.searches) || (b.flips != null && !Array.isArray(b.flips))) return res.status(400).json({ error: 'That isn\'t a Deal Pinger backup' });
+    // Check everything first, then write it all in one transaction: a bad backup changes nothing.
+    const sig = (s) => `${String(s.keywords).toLowerCase().trim()}|${[...s.sources].sort().join(',')}`;
+    const have = new Set(db.listSearches().map(sig));
     const cleaned = [];
+    let skipped = 0;
     for (const raw of b.searches) {
       const [s, error] = cleanSearch({ ...raw, discordWebhook: undefined }, { partial: false });
       if (error) return res.status(400).json({ error: `Search "${raw?.name ?? '?'}": ${error}` });
+      // Already watching the same thing: adding it again would double every alert.
+      if (have.has(sig(s))) { skipped++; continue; }
+      have.add(sig(s));
       cleaned.push(s);
     }
-    for (const s of cleaned) db.addSearch(s);
-    let flips = 0;
+    const flipRows = [];
     for (const f of b.flips || []) {
-      const bought = num(f.boughtPrice);
-      if (!f.title || bought == null || Number.isNaN(bought)) continue;
-      db.addFlip({ title: String(f.title), boughtPrice: bought, source: f.source ?? null, url: f.url ?? null, image: f.image ?? null,
-        soldPrice: num(f.soldPrice) ?? null, soldAt: f.soldAt ?? null, fees: num(f.fees) ?? 0, notes: String(f.notes ?? '') });
-      flips++;
+      const row = { title: String(f?.title ?? '').trim(), boughtPrice: num(f?.boughtPrice), soldPrice: num(f?.soldPrice), fees: num(f?.fees) ?? 0 };
+      if (!row.title) return res.status(400).json({ error: 'A flip in the backup has no name' });
+      for (const k of ['boughtPrice', 'soldPrice', 'fees']) {
+        if (Number.isNaN(row[k]) || (row[k] != null && row[k] < 0)) return res.status(400).json({ error: `Flip "${row.title}": ${FIELD_ERRORS[k]}` });
+      }
+      if (row.boughtPrice == null) return res.status(400).json({ error: `Flip "${row.title}": ${FIELD_ERRORS.boughtPrice}` });
+      flipRows.push({ ...row, source: f.source ?? null, url: f.url ?? null, image: f.image ?? null, notes: String(f.notes ?? ''),
+        boughtAt: typeof f.boughtAt === 'string' ? f.boughtAt : undefined,
+        soldAt: row.soldPrice != null && typeof f.soldAt === 'string' ? f.soldAt : null });
     }
+    db.raw.exec('BEGIN');
+    try {
+      for (const s of cleaned) db.addSearch(s);
+      for (const f of flipRows) db.addFlip(f);
+      db.raw.exec('COMMIT');
+    } catch (e) {
+      db.raw.exec('ROLLBACK');
+      return res.status(400).json({ error: `Couldn't restore: ${e.message}` });
+    }
+    const flips = flipRows.length;
     const st = b.settings || {};
     const patch = {};
     if (HHMM.test(st.quietStart || '') || st.quietStart === null) patch.quietStart = st.quietStart;
@@ -290,14 +326,14 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     if (SCAM_FILTERS.includes(st.scamFilter)) patch.scamFilter = st.scamFilter;
     if (TAP_OPENS.includes(st.tapOpens)) patch.tapOpens = st.tapOpens;
     db.setSettings(patch);
-    res.json({ searches: cleaned.length, flips });
+    res.json({ searches: cleaned.length, skipped, flips });
   });
 
   app.get('/api/flips', (_req, res) => res.json({ flips: db.listFlips(), summary: db.flipSummary() }));
 
   app.post('/api/flips', (req, res) => {
     const b = req.body || {};
-    const hit = b.hitId != null ? db.recentHits(1000, { includeDismissed: true }).find(h => h.id === Number(b.hitId)) : null;
+    const hit = b.hitId != null ? db.getHit(Number(b.hitId)) : null;
     const title = String(b.title ?? hit?.listing.title ?? '').trim();
     const bought = num(b.boughtPrice ?? hit?.listing.price);
     if (!title) return res.status(400).json({ error: 'Give it a name' });
@@ -318,7 +354,7 @@ export function createApp({ db, config, runNow, notify, health, linkTelegram, ce
     for (const k of ['boughtPrice', 'soldPrice', 'fees']) {
       if (b[k] === undefined) continue;
       const v = num(b[k]);
-      if (Number.isNaN(v) || (v != null && v < 0)) return res.status(400).json({ error: `${k} must be a positive number` });
+      if (Number.isNaN(v) || (v != null && v < 0)) return res.status(400).json({ error: FIELD_ERRORS[k] });
       if (k === 'boughtPrice' && v == null) return res.status(400).json({ error: 'Enter what you paid' });
       patch[k] = k === 'fees' ? (v ?? 0) : v;
     }

@@ -78,8 +78,9 @@ test('backup has no secrets, and restore adds searches and flips', async () => {
   assert.equal(backup.settings.feePct, 12);
   const n = db.listSearches().length;
   const r = await (await req('/api/restore', { method: 'POST', body: backup })).json();
-  assert.equal(r.searches, n);
-  assert.equal(db.listSearches().length, n * 2);
+  assert.equal(r.searches, 0); // same searches already exist: skipped, not doubled
+  assert.equal(r.skipped, n);
+  assert.equal(db.listSearches().length, n);
   assert.equal(db.listFlips().length, 2);
   assert.equal((await req('/api/restore', { method: 'POST', body: { searches: 'nope' } })).status, 400);
   const big = { searches: [], flips: Array.from({ length: 2000 }, (_, i) => ({ title: 'Flip number ' + i + ' with a fairly long description', boughtPrice: 10 })) };
