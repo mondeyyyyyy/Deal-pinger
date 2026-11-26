@@ -74,3 +74,11 @@ test('Telegram escapes HTML in listing titles', async () => {
   await notify({ name: 'S' }, { id: 1, listing: { ...listing, title: '<b>PS5</b> & games' }, estimate: null });
   assert.match(posts[0].body.text, /&lt;b&gt;PS5&lt;\/b&gt; &amp; games/);
 });
+
+test('Discord shows the listing description when known (trimmed)', async () => {
+  const { posts, notify } = setup({ discordWebhook: 'https://discord.com/api/webhooks/1/g' });
+  await notify({ name: 'PS5' }, { id: 1, listing: { ...listing, description: 'Barely used.\n\nComes with box. '.repeat(40) }, estimate });
+  const f = posts[0].body.embeds[0].fields.find(x => x.name === 'Description');
+  assert.ok(f.value.length <= 300);
+  assert.match(f.value, /^Barely used\. Comes with box\./);
+});

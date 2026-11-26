@@ -21,6 +21,9 @@ Your own Swoopa-style reselling alert app for the UK. Save searches like "Ninten
 - **Evening summary** (optional): deals found, the best one, scams hidden and your flip profit, at a time you choose.
 - **Backup and restore** your searches, settings and flips (Settings → Backup). Backups never include passwords or tokens.
 - **Log out all devices** in Settings → Account.
+- **No buyer posts or swaps.** "WANTED", "WTB", "Looking for…" and swap-only listings are skipped automatically.
+- **One ping per listing.** If two of your searches catch the same listing, you're pinged once; it still shows under both.
+- **Vinted descriptions** are read for new deals and shown on the card and in Discord. The scam filter and seller messages use them too, e.g. "bank transfer only" or "collection only" written in the description.
 - **🔥 Hot deals** (profit at least half the asking price) are flagged in alerts and the feed.
 - **Bursts become one alert.** More than 3 new deals from one check arrive as a single summary, best profit first.
 - **Flips tracker.** Tap **Bought** on a deal, later tap **Sold**, and see profit this month, total profit, stock tied up and return on investment. You can export it all to a spreadsheet.

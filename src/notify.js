@@ -71,6 +71,7 @@ function discordDeal(search, hit, sourceLabel) {
   if (l.seller) fields.push({ name: 'Seller', value: [l.seller.name, l.seller.ratings != null ? `${l.seller.ratings} ratings` : null].filter(Boolean).join(' · ') || 'unknown', inline: true });
   fields.push({ name: 'Marketplace', value: sourceLabel(l.source), inline: true });
   fields.push({ name: 'Search', value: String(search.name).slice(0, 100), inline: true });
+  if (l.description) fields.push({ name: 'Description', value: String(l.description).replace(/\s+/g, ' ').slice(0, 300), inline: false });
   if (risky(l)) fields.push({ name: '⚠️ Scam check', value: l.scam.reasons.join(', ').slice(0, 1000) || 'looks risky', inline: false });
   const color = l.scam?.risk === 'high' ? COLORS.high : l.scam?.risk === 'medium' ? COLORS.medium : e && e.score >= HOT_SCORE ? COLORS.hot : COLORS.normal;
   const embed = { title: `${lead(hit)} · ${l.title}`.slice(0, 256), url: l.url, description: links.join(' · '), color, fields, timestamp: new Date().toISOString(), footer: { text: 'Deal Pinger' } };

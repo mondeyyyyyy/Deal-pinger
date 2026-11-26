@@ -174,6 +174,7 @@ function renderDeals() {
           <div class="meta">${esc(when)}${l.location ? ' · ' + esc(l.location) : ''}${seller ? ' · ' + esc(seller) : ''}</div>
           ${valueLine ? `<div class="meta">${esc(valueLine)}</div>` : ''}
           <div class="meta"><a class="linkish" data-act="sold" href="${esc(soldUrl(h))}" target="_blank" rel="noopener">Check eBay sold prices ↗</a></div>
+          ${l.description ? `<div class="desc">${esc(String(l.description).replace(/\s+/g, ' ').slice(0, 160))}${l.description.length > 160 ? '…' : ''}</div>` : ''}
           ${scam ? `<div class="warn">${esc(l.scam.reasons.join(' · '))}</div>` : ''}
         </div>
       </div>
